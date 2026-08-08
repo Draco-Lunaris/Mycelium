@@ -1,20 +1,20 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Request, Response, Router } from "express";
 import express from "express";
-import type { KnowledgeBase } from "@mycelium/core";
+import type { ShelfRegistry } from "@mycelium/core";
 import { buildMcpServer } from "./server.js";
 
 /**
  * MCP streamable-HTTP at /mcp. Stateless: a fresh McpServer + transport per
- * request (no session store) — the KB itself serializes mutations. Express
+ * request (no session store) — each KB serializes its own mutations. Express
  * hands the SDK transport the raw Node req/res directly, so there is no
  * hijack/lifecycle glue and CORS is handled by the app-level cors() middleware.
  */
-export function mcpRouter(kb: KnowledgeBase): Router {
+export function mcpRouter(registry: ShelfRegistry): Router {
   const router = express.Router();
 
   const handle = async (req: Request, res: Response) => {
-    const server = await buildMcpServer(kb);
+    const server = await buildMcpServer(registry);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless
       enableJsonResponse: true, // one JSON reply per request — no long-lived SSE

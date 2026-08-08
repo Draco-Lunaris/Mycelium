@@ -1,4 +1,5 @@
 import type { KnowledgeBase } from "@mycelium/core";
+import type { ShelfRegistry } from "@mycelium/core";
 import type { TreeNode } from "@mycelium/core";
 
 const MAX_SEED_CHARS = 3000;
@@ -14,7 +15,7 @@ const MAX_DESCRIPTIONS_PER_SEGMENT = 10;
  * concept DESCRIPTIONS per segment — semantic hooks beat filenames for
  * igniting the "memory might know this" instinct.
  */
-export async function buildSeedMemory(kb: KnowledgeBase): Promise<string> {
+export async function buildSeedMemory(kb: KnowledgeBase, registry?: ShelfRegistry): Promise<string> {
   const [tree, types, log] = await Promise.all([kb.listTree(), kb.listTypes(), kb.readLog()]);
 
   const segments: string[] = [];
@@ -46,10 +47,23 @@ export async function buildSeedMemory(kb: KnowledgeBase): Promise<string> {
 
   const recent = log.slice(0, 3).map((e) => `- ${e.date} ${e.action}: ${e.summary}`);
 
-  const sections = [
+  const sections: string[] = [
     `Concept types in use: ${types.join(", ") || "(none yet)"}`,
     `Memory segments:\n${segments.join("\n") || "(empty — nothing stored yet)"}`,
   ];
+
+  // Shelves: independent topic stores the calling agent can target by name.
+  // Listed up front so the routing instinct fires before the detail is truncated.
+  if (registry && registry.shelfNames.length > 0) {
+    const shelves = await registry.list();
+    const shelfLines =
+      shelves.map((s) => `* ${s.name} — ${s.conceptCount} concept${s.conceptCount === 1 ? "" : "s"}`).join("\n") ||
+      "(none)";
+    sections.unshift(
+      `Shelves (independent topic stores — pass shelf="<name>" to scope a tool to one):\n${shelfLines}`
+    );
+  }
+
   if (recent.length > 0) sections.push(`Recent activity:\n${recent.join("\n")}`);
 
   let seed = sections.join("\n\n");
@@ -102,5 +116,6 @@ How to use your memory:
 - BEFORE answering anything related to the topics above, call memory_query — the answer may already be stored. Prefer stored knowledge over guessing.
 - When you learn a lasting fact, decision, preference, or piece of documentation, persist it with memory_add. If it isn't stored, it will be forgotten.
 - When existing knowledge turns out to be wrong or outdated, fix it with memory_update.
-- memory_status reports size and health of the memory.`;
+- memory_status reports size and health of the memory.
+- Shelves: if a Shelves section is listed above, the memory has a global store plus independent topic shelves. Pass shelf="<name>" to memory_query/memory_add/memory_update/memory_status/memory_maintain to scope the call to that shelf; omit it (or use "global") for the global store. Keep high-level topics in the global store and topic detail in the matching shelf.`;
 }

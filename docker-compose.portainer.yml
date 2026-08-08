@@ -10,8 +10,11 @@ services:
       # Persistent OKF bundle. Swap for a bind mount (e.g. /srv/okf-bundle:/bundle)
       # if you want to edit the markdown from the host / sync it with git.
       - okf-bundle:/bundle
+      # Independent topic shelves — each subdir with an index.md is a shelf.
+      - mycelium-shelves:/shelves
     environment:
       BUNDLE_ROOT: /bundle
+      SHELVES_ROOT: /shelves
       AUTH_TOKEN: ${AUTH_TOKEN:-}
       # Primary model
       LLM_API_BASE_URL: ${LLM_API_BASE_URL}
@@ -37,3 +40,4 @@ services:
 
 volumes:
   okf-bundle:
+  mycelium-shelves:

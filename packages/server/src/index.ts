@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
-import { KnowledgeBase, resolveFallbackConfig, resolveModelConfig } from "@mycelium/core";
+import { ShelfRegistry, resolveFallbackConfig, resolveModelConfig, resolveShelvesRoot } from "@mycelium/core";
 import { mcpRouter } from "./mcp/http.js";
 import { browseRouter } from "./api/browse.js";
 import { chatRouter } from "./api/chat.js";
@@ -16,11 +16,14 @@ if (!bundleRoot) {
   process.exit(1);
 }
 
-const kb = new KnowledgeBase(bundleRoot, {
+const registry = new ShelfRegistry(bundleRoot, {
+  shelvesRoot: resolveShelvesRoot(),
   gitAutocommit: process.env.GIT_AUTOCOMMIT === "true",
 });
+const shelves = await registry.discover();
+if (shelves.length > 0) console.log(`[mycelium] shelves: ${shelves.join(", ")}`);
 
-startDreamer(kb);
+startDreamer(registry);
 
 const app = express();
 
@@ -71,9 +74,9 @@ if (authToken) {
   console.log("[mycelium] auth: disabled (set AUTH_TOKEN to protect /mcp and /api)");
 }
 
-app.use("/mcp", mcpRouter(kb));
-app.use("/api", browseRouter(kb));
-app.use("/api", chatRouter(kb));
+app.use("/mcp", mcpRouter(registry));
+app.use("/api", browseRouter(registry));
+app.use("/api", chatRouter(registry));
 
 // Serve the built web UI in production (single container), with SPA fallback.
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
@@ -86,5 +89,6 @@ if (existsSync(webDist)) {
 
 const port = Number(process.env.PORT ?? 3800);
 app.listen(port, "0.0.0.0", () => {
-  console.log(`mycelium serving bundle ${bundleRoot} on :${port} (web + /api + /mcp)`);
+  const shelfNote = shelves.length > 0 ? ` + ${shelves.length} shelf${shelves.length === 1 ? "" : "s"}` : "";
+  console.log(`mycelium serving bundle ${bundleRoot}${shelfNote} on :${port} (web + /api + /mcp)`);
 });

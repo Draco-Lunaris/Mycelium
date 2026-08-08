@@ -38,7 +38,7 @@ describe("hotLookup", () => {
 
   it("answers from recently written concepts (read fresh) and falls through on UNKNOWN", async () => {
     await kb.writeConcept("/facts/deploy.md", { type: "Fact", title: "Deploy day" }, "We deploy on Fridays.", "add");
-    recordHotWrite("/facts/deploy.md");
+    recordHotWrite(root, "/facts/deploy.md");
 
     const confident = vi.fn(async () => "We deploy on Fridays. (from /facts/deploy.md)");
     const answer = await hotLookup(kb, "when do we deploy?", {}, confident);
@@ -52,14 +52,14 @@ describe("hotLookup", () => {
   });
 
   it("purges hot Q&As on writes and drops deleted concepts", async () => {
-    recordHotQuery("q1", "a1");
-    recordHotWrite("/facts/x.md"); // any write invalidates prior answers
+    recordHotQuery(root, "q1", "a1");
+    recordHotWrite(root, "/facts/x.md"); // any write invalidates prior answers
     const generate = vi.fn(async () => "should not matter");
     // /facts/x.md doesn't exist on disk → dropped at read; Q&As purged → empty set → null.
     expect(await hotLookup(kb, "q1", {}, generate)).toBeNull();
     expect(generate).not.toHaveBeenCalled();
 
-    recordHotDelete("/facts/x.md");
+    recordHotDelete(root, "/facts/x.md");
     expect(await hotLookup(kb, "q1", {}, generate)).toBeNull();
   });
 
@@ -68,7 +68,7 @@ describe("hotLookup", () => {
     try {
       process.env.HOT_MEMORY_TTL = "1m";
       await kb.writeConcept("/facts/a.md", { type: "Fact", title: "A" }, "alpha", "add");
-      recordHotWrite("/facts/a.md");
+      recordHotWrite(root, "/facts/a.md");
       vi.advanceTimersByTime(61_000);
       const generate = vi.fn();
       expect(await hotLookup(kb, "a?", {}, generate)).toBeNull();
@@ -79,7 +79,7 @@ describe("hotLookup", () => {
 
     process.env.HOT_MEMORY = "false";
     await kb.writeConcept("/facts/b.md", { type: "Fact", title: "B" }, "beta", "add");
-    recordHotWrite("/facts/b.md");
+    recordHotWrite(root, "/facts/b.md");
     const generate = vi.fn();
     expect(await hotLookup(kb, "b?", {}, generate)).toBeNull();
     expect(generate).not.toHaveBeenCalled();

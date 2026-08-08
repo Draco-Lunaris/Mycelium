@@ -41,7 +41,9 @@ export async function bundleFingerprint(kb: KnowledgeBase): Promise<string> {
       }
     })
   );
-  return createHash("sha256").update(parts.join("|")).digest("hex");
+  // Include the bundle root so two shelves with coincidentally identical
+  // relative paths/mtimes/sizes never share a cache key.
+  return createHash("sha256").update(`${kb.bundle.root}|${parts.join("|")}`).digest("hex");
 }
 
 /**
@@ -92,7 +94,7 @@ export async function runQueryCached(
   // Layer 3: deep memory — the full agent loop. Its answer feeds the hot set.
   const result = await runner(kb, question, options);
   store(key, result, ttl);
-  recordHotQuery(question, result.answer);
+  recordHotQuery(kb.bundle.root, question, result.answer);
   return { ...result, cached: false, source: "deep" };
 }
 

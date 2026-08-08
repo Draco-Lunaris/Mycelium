@@ -1,23 +1,56 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { KnowledgeBase, runMutation, runQueryCached, type MutationOutcome } from "@mycelium/core";
+import {
+  runMutation,
+  runQueryCached,
+  type KnowledgeBase,
+  type MutationOutcome,
+  type ShelfRegistry,
+} from "@mycelium/core";
 import { buildSeedMemory, seedInstructions } from "./seed.js";
+
+/** Optional shelf selector shared by every knowledge tool's input schema. */
+const shelfSchema = z
+  .string()
+  .optional()
+  .describe(
+    'Shelf name to scope this call to (an independent topic store). Omit, or use "global", for the global store.'
+  );
+
+/** Resolve a shelf (or the global store) to a KnowledgeBase, or an error reply. */
+function resolveKb(
+  registry: ShelfRegistry,
+  shelf?: string
+): { kb: KnowledgeBase } | { error: string } {
+  try {
+    return { kb: registry.get(shelf) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function errorReply(message: string) {
+  return { content: [{ type: "text" as const, text: message }], isError: true };
+}
 
 /**
  * Build the OKF MCP server. Each knowledge tool internally drives the LLM
- * agent (OKF spec in its system prompt) against the bundle.
+ * agent (OKF spec in its system prompt) against a single bundle. A `shelf`
+ * argument on any tool scopes the call to an independent topic store; the
+ * agent loop itself stays single-bundle-per-call.
+ *
  * Transport-agnostic — used by both the stdio bin and the HTTP endpoint.
  *
- * Seed memory: a session-start overview of what the KB contains, injected via
- * BOTH channels that reach the client LLM — the initialize `instructions`
- * field (standards channel) and the memory_query tool description (universal
- * fallback; every tool-calling client loads descriptions). Without it the
- * client model has no signal that memory might hold an answer.
+ * Seed memory: a session-start overview of the GLOBAL store plus the list of
+ * shelves, injected via BOTH channels that reach the client LLM — the
+ * initialize `instructions` field (standards channel) and the memory_query
+ * tool description (universal fallback). Without it the client model has no
+ * signal that memory might hold an answer.
  */
-export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
+export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer> {
   // Seed generation must never prevent the server from starting — a missing
   // or empty bundle root degrades to a minimal seed, not a crash.
-  const seed = await buildSeedMemory(kb).catch((err: Error) => {
+  const seed = await buildSeedMemory(registry.global, registry).catch((err: Error) => {
     console.error(`[mycelium] seed generation failed: ${err.message}`);
     return "(memory overview unavailable — the bundle may be empty or unreadable; memory_status can diagnose)";
   });
@@ -37,10 +70,15 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
     {
       title: "Query the knowledge base",
       description: queryDescription(seed),
-      inputSchema: { question: z.string().describe("The question to answer") },
+      inputSchema: {
+        question: z.string().describe("The question to answer"),
+        shelf: shelfSchema,
+      },
     },
-    async ({ question }) => {
-      const { answer, source } = await runQueryCached(kb, question);
+    async ({ question, shelf }) => {
+      const r = resolveKb(registry, shelf);
+      if ("error" in r) return errorReply(r.error);
+      const { answer, source } = await runQueryCached(r.kb, question);
       const marker = source === "cache" ? "\n\n(cached answer)" : source === "hot" ? "\n\n(hot memory)" : "";
       return {
         content: [{ type: "text", text: `${answer}${marker}` }],
@@ -57,7 +95,7 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
    */
   const refreshSeed = async () => {
     try {
-      const fresh = await buildSeedMemory(kb);
+      const fresh = await buildSeedMemory(registry.global, registry);
       queryTool.update({ description: queryDescription(fresh) });
     } catch (err) {
       console.error(`[mycelium] seed refresh failed: ${(err as Error).message}`);
@@ -104,9 +142,13 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
           .string()
           .optional()
           .describe('Optional bundle path hint, e.g. "/apis/payments.md"'),
+        shelf: shelfSchema,
       },
     },
-    async ({ content, suggested_path }) => {
+    async ({ content, suggested_path, shelf }) => {
+      const r = resolveKb(registry, shelf);
+      if ("error" in r) return errorReply(r.error);
+      const kb = r.kb;
       // Wrap the payload as an explicit directive. Bare content (e.g. a plain
       // fact like "The user's name is Anirban Kar.") otherwise reads as a chat
       // message and the agent replies conversationally instead of persisting it.
@@ -134,10 +176,13 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
         "Instruct a change to existing knowledge (correct a fact, deprecate a concept, restructure). An internal agent locates the concepts and applies targeted edits.",
       inputSchema: {
         instruction: z.string().describe("What to change, in natural language"),
+        shelf: shelfSchema,
       },
     },
-    async ({ instruction }) => {
-      const outcome = await runMutation(kb, instruction);
+    async ({ instruction, shelf }) => {
+      const r = resolveKb(registry, shelf);
+      if ("error" in r) return errorReply(r.error);
+      const outcome = await runMutation(r.kb, instruction);
       await refreshSeed();
       return mutationOutcomeResponse(outcome);
     }
@@ -149,9 +194,12 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
       title: "Knowledge base status",
       description:
         "Deterministic (no LLM): bundle statistics and OKF conformance report.",
-      inputSchema: {},
+      inputSchema: { shelf: shelfSchema },
     },
-    async () => {
+    async ({ shelf }) => {
+      const r = resolveKb(registry, shelf);
+      if ("error" in r) return errorReply(r.error);
+      const kb = r.kb;
       const [report, lint, types] = await Promise.all([kb.validate(), kb.lint(), kb.listTypes()]);
       return {
         content: [
@@ -159,6 +207,7 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
             type: "text",
             text: JSON.stringify(
               {
+                shelf: shelf && shelf !== "global" ? shelf : "global",
                 conformant: report.conformant,
                 concepts: report.conceptCount,
                 directories: report.directoryCount,
@@ -187,9 +236,12 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
       title: "Maintain / repair memory",
       description:
         "Health-check and repair the knowledge graph: an internal agent wires orphaned concepts (nothing links to them) into related concepts and fixes broken links. Run periodically to counter drift. No-op when the graph is already healthy.",
-      inputSchema: {},
+      inputSchema: { shelf: shelfSchema },
     },
-    async () => {
+    async ({ shelf }) => {
+      const r = resolveKb(registry, shelf);
+      if ("error" in r) return errorReply(r.error);
+      const kb = r.kb;
       const before = await kb.lint();
       if (before.healthy) {
         return {

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * MCP over stdio — register in Claude Code / Claude Desktop:
- *   claude mcp add okf-kb -e BUNDLE_ROOT=/path/to/bundle -e OPENROUTER_API_KEY=... \
- *     -e LLM_PROVIDER=openrouter -- node <repo>/packages/server/dist/mcp/stdio.js
+ *   claude mcp add mycelium -e BUNDLE_ROOT=/path/to/bundle -e LLM_API_BASE_URL=... \
+ *     -e LLM_API_KEY=... -e LLM_API_FORMAT=openai -e LLM_MODEL=... \
+ *     -- node <repo>/packages/server/dist/mcp/stdio.js
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { KnowledgeBase, resolveFallbackConfig, resolveModelConfig } from "@mycelium/core";
+import { ShelfRegistry, resolveFallbackConfig, resolveModelConfig, resolveShelvesRoot } from "@mycelium/core";
 import { buildMcpServer } from "./server.js";
 
 const bundleRoot = process.env.BUNDLE_ROOT;
@@ -34,10 +35,14 @@ try {
   process.exit(1);
 }
 
-const kb = new KnowledgeBase(bundleRoot, {
+const registry = new ShelfRegistry(bundleRoot, {
+  shelvesRoot: resolveShelvesRoot(),
   gitAutocommit: process.env.GIT_AUTOCOMMIT === "true",
 });
-const server = await buildMcpServer(kb);
+const shelves = await registry.discover();
+if (shelves.length > 0) console.error(`[mycelium] shelves: ${shelves.join(", ")}`);
+
+const server = await buildMcpServer(registry);
 await server.connect(new StdioServerTransport());
 // stdio transport keeps the process alive; logs must go to stderr only.
-console.error(`[mycelium] serving bundle ${bundleRoot} over stdio`);
+console.error(`[mycelium] serving bundle ${bundleRoot}${shelves.length ? ` + ${shelves.length} shelf(s)` : ""} over stdio`);

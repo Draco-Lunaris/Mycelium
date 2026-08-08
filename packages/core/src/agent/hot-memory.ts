@@ -25,39 +25,57 @@ const MAX_QAS = 10;
 const DEFAULT_TTL_MS = 3_600_000;
 const MAX_EXCERPT_CHARS = 1500;
 
-// Module-level: survives per-request McpServer instances (stateless HTTP).
-const hotConcepts = new Map<string, number>(); // path → touchedAt
-let hotQAs: HotQA[] = [];
+interface HotBundleState {
+  concepts: Map<string, number>; // path → touchedAt
+  qas: HotQA[];
+}
+
+// Module-level, keyed by bundle root: survives per-request McpServer instances
+// (stateless HTTP). Keying by root keeps each shelf's hot set independent so a
+// write to one bundle never purges another's recent answers.
+const hotBundles = new Map<string, HotBundleState>();
+
+function stateFor(root: string): HotBundleState {
+  let s = hotBundles.get(root);
+  if (!s) {
+    s = { concepts: new Map(), qas: [] };
+    hotBundles.set(root, s);
+  }
+  return s;
+}
 
 /** Called by the write tools after any concept write/patch. */
-export function recordHotWrite(path: string): void {
-  hotConcepts.delete(path);
-  hotConcepts.set(path, Date.now());
-  while (hotConcepts.size > MAX_CONCEPTS) {
-    const oldest = hotConcepts.keys().next().value;
+export function recordHotWrite(root: string, path: string): void {
+  const s = stateFor(root);
+  s.concepts.delete(path);
+  s.concepts.set(path, Date.now());
+  while (s.concepts.size > MAX_CONCEPTS) {
+    const oldest = s.concepts.keys().next().value;
     if (oldest === undefined) break;
-    hotConcepts.delete(oldest);
+    s.concepts.delete(oldest);
   }
   // A write may contradict previous answers — drop them.
-  hotQAs = [];
+  s.qas = [];
 }
 
 /** Called on deletes: the concept leaves the hot set; answers may be stale. */
-export function recordHotDelete(path: string): void {
-  hotConcepts.delete(path);
-  hotQAs = [];
+export function recordHotDelete(root: string, path: string): void {
+  const s = stateFor(root);
+  s.concepts.delete(path);
+  s.qas = [];
 }
 
 /** Called after a deep query completes. */
-export function recordHotQuery(question: string, answer: string): void {
-  hotQAs.push({ question, answer, at: Date.now() });
-  if (hotQAs.length > MAX_QAS) hotQAs = hotQAs.slice(-MAX_QAS);
+export function recordHotQuery(root: string, question: string, answer: string): void {
+  const s = stateFor(root);
+  s.qas.push({ question, answer, at: Date.now() });
+  if (s.qas.length > MAX_QAS) s.qas = s.qas.slice(-MAX_QAS);
 }
 
-/** Test hook. */
-export function clearHotMemory(): void {
-  hotConcepts.clear();
-  hotQAs = [];
+/** Test hook. Pass a root to reset one bundle; omit to reset all. */
+export function clearHotMemory(root?: string): void {
+  if (root) hotBundles.delete(root);
+  else hotBundles.clear();
 }
 
 export type HotGenerate = (
@@ -82,9 +100,10 @@ export async function hotLookup(
   const ttl = parseDuration(process.env.HOT_MEMORY_TTL) ?? DEFAULT_TTL_MS;
   const cutoff = Date.now() - ttl;
 
+  const s = stateFor(kb.bundle.root);
   const sections: string[] = [];
 
-  for (const [path, touchedAt] of hotConcepts) {
+  for (const [path, touchedAt] of s.concepts) {
     if (touchedAt < cutoff) continue;
     try {
       const c = await kb.readConcept(path); // fresh read — never stale
@@ -94,10 +113,10 @@ export async function hotLookup(
           c.body.slice(0, MAX_EXCERPT_CHARS)
       );
     } catch {
-      hotConcepts.delete(path); // deleted behind our back
+      s.concepts.delete(path); // deleted behind our back
     }
   }
-  for (const qa of hotQAs) {
+  for (const qa of s.qas) {
     if (qa.at < cutoff) continue;
     sections.push(`PREVIOUS Q&A\nQ: ${qa.question}\nA: ${qa.answer}`);
   }
