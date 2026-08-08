@@ -70,6 +70,11 @@ export class ShelfRegistry {
     this.shelves.set(name, kb);
   }
 
+  /** Construct a KnowledgeBase for a path under shelvesRoot using the registry's options. */
+  newKb(root: string): KnowledgeBase {
+    return new KnowledgeBase(root, this.kbOptions);
+  }
+
   /** Forget a shelf (e.g. after it's removed from disk). */
   unregister(name: string): void {
     this.shelves.delete(name);

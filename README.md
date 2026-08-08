@@ -149,6 +149,39 @@ BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/server dev
 pnpm --filter @mycelium/web dev
 ```
 
+## Shelves — independent topic stores
+
+The global bundle keeps the high-level map; a **shelf** is a second OKF bundle (its own `index.md`/`log.md`/graph) holding a topic's detail. Shelves live under `SHELVES_ROOT` (default a `shelves/` dir sibling to `BUNDLE_ROOT`); each subdirectory containing an `index.md` is a shelf.
+
+**Routing is explicit.** The MCP tools (`memory_query`/`memory_add`/`memory_update`/`memory_status`/`memory_maintain`) and the `/api/*` browse routes accept an optional `shelf` argument (default = global):
+
+```
+memory_query({ question: "summarize chapter 3", shelf: "mycology" })
+GET /api/graph?shelf=mycology
+```
+
+The session-start seed lists available shelves so the calling agent knows where to look. The internal agent stays scoped to one bundle per call — global for high-level topics, the matching shelf for detail.
+
+### Shelf CLI
+
+```bash
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf create mycology        # empty shelf
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import <book-slug>/kb --name mycology   # whole bundle → new shelf
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import-book <book-slug>/kb/<book-slug> --into mycology   # add a book segment
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf list
+```
+
+### Importing books from the `pdf-to-markdown` skill
+
+The `pdf-to-markdown` skill emits a structurally identical OKF bundle at `<book-slug>/kb/` (root `index.md` + `log.md` + a per-book segment of `book.md` + `ch-N-*.md` chapter concepts; `type: Project` for the book, `type: Reference` for chapters). It drops in as a shelf with zero transformation:
+
+```bash
+# after: pdf-to-markdown produces out/the-art-of-x/kb/
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import out/the-art-of-x/kb --name art
+```
+
+Chapter `resource` fields deep-link into the readable book (`file://.../the-art-of-x.md#ch-3-...`); links are absolute-from-bundle-root so they stay valid inside the shelf.
+
 ## MCP registration (Claude Code / Desktop)
 
 ```bash
