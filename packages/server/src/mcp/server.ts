@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { KnowledgeBase, runMutation, runQueryCached, type MutationOutcome } from "@understory/core";
+import { KnowledgeBase, runMutation, runQueryCached, type MutationOutcome } from "@mycelium/core";
 import { buildSeedMemory, seedInstructions } from "./seed.js";
 
 /**
@@ -18,7 +18,7 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
   // Seed generation must never prevent the server from starting — a missing
   // or empty bundle root degrades to a minimal seed, not a crash.
   const seed = await buildSeedMemory(kb).catch((err: Error) => {
-    console.error(`[understory] seed generation failed: ${err.message}`);
+    console.error(`[mycelium] seed generation failed: ${err.message}`);
     return "(memory overview unavailable — the bundle may be empty or unreadable; memory_status can diagnose)";
   });
 
@@ -28,7 +28,7 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
     `CURRENT MEMORY OVERVIEW:\n${s}`;
 
   const server = new McpServer(
-    { name: "understory", version: "0.1.0" },
+    { name: "mycelium", version: "0.1.0" },
     { instructions: seedInstructions(seed) }
   );
 
@@ -60,7 +60,7 @@ export async function buildMcpServer(kb: KnowledgeBase): Promise<McpServer> {
       const fresh = await buildSeedMemory(kb);
       queryTool.update({ description: queryDescription(fresh) });
     } catch (err) {
-      console.error(`[understory] seed refresh failed: ${(err as Error).message}`);
+      console.error(`[mycelium] seed refresh failed: ${(err as Error).message}`);
     }
   };
 

@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { convertToModelMessages, type UIMessage } from "ai";
-import { streamChat, type KnowledgeBase } from "@understory/core";
+import { streamChat, type KnowledgeBase } from "@mycelium/core";
 
 interface ChatBody {
   messages: UIMessage[];

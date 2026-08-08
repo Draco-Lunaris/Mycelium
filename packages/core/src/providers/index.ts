@@ -14,7 +14,7 @@ export interface ModelConfig {
 }
 
 const LEGACY_NOTICE =
-  "[understory] using legacy env vars. Migrate to LLM_API_BASE_URL + LLM_API_KEY + LLM_API_FORMAT.";
+  "[mycelium] using legacy env vars. Migrate to LLM_API_BASE_URL + LLM_API_KEY + LLM_API_FORMAT.";
 
 /** Ensure the URL ends in /v1 — llama-server serves the OpenAI API there. */
 function normalizeV1(baseURL: string): string {

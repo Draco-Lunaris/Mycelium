@@ -18,7 +18,7 @@ function fakeRunner(answer: string) {
 }
 
 beforeEach(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), "ustory-cache-"));
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "mycelium-cache-"));
   kb = new KnowledgeBase(root);
   clearQueryCache();
   clearHotMemory();

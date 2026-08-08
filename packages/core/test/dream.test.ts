@@ -9,7 +9,7 @@ let root: string;
 let kb: KnowledgeBase;
 
 beforeEach(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), "ustory-dream-"));
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "mycelium-dream-"));
   kb = new KnowledgeBase(root);
 });
 

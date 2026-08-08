@@ -77,7 +77,7 @@ export interface AppConfig {
   fallbackConfigured: boolean;
 }
 
-const TOKEN_KEY = "understory-token";
+const TOKEN_KEY = "mycelium-token";
 
 export function getAuthToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? "";

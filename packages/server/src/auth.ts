@@ -20,7 +20,7 @@ export function bearerAuth(token: string) {
     }
     res
       .status(401)
-      .set("WWW-Authenticate", 'Bearer realm="understory"')
+      .set("WWW-Authenticate", 'Bearer realm="mycelium"')
       .json({ error: "unauthorized: set Authorization: Bearer <AUTH_TOKEN>" });
   };
 }

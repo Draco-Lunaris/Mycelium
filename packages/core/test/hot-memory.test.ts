@@ -17,7 +17,7 @@ let root: string;
 let kb: KnowledgeBase;
 
 beforeEach(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), "ustory-hot-"));
+  root = await fs.mkdtemp(path.join(os.tmpdir(), "mycelium-hot-"));
   kb = new KnowledgeBase(root);
   clearHotMemory();
   clearQueryCache();

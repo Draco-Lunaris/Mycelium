@@ -1,8 +1,8 @@
-# understory 🌱
+# mycelium 🌱
 
 **Memory that grows.**
 
-The layer beneath your agents: a self-wiring, plain-markdown memory. Every fact your agents learn is filed as a markdown concept, cross-linked into a living knowledge graph, and kept healthy by the agent itself — searchable, diffable, and entirely yours. Runs great on local models.
+A self-wiring, plain-markdown memory network beneath your agents. Every fact your agents learn is filed as a markdown concept, cross-linked into a living knowledge graph, and kept healthy by the agent itself — searchable, diffable, and entirely yours. Runs great on local models.
 
 Bundles follow the [Open Knowledge Format (OKF) v0.1 spec](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) — plain markdown files with YAML frontmatter, readable by humans, diffable in git, portable across tools.
 
@@ -21,14 +21,14 @@ No clone needed — the image is public. Save this as `docker-compose.yml`:
 
 ```yaml
 services:
-  understory:
-    image: ghcr.io/thecodacus/understory:latest
+  mycelium:
+    image: ghcr.io/draco-lunaris/mycelium:latest
     ports:
       - "3800:3800"
     volumes:
       # Your memory lives here as plain markdown — a named volume, or point
       # a bind mount (e.g. ./my-memory:/bundle) at any OKF bundle.
-      - understory-memory:/bundle
+      - mycelium-memory:/bundle
     environment:
       BUNDLE_ROOT: /bundle
       LLM_API_BASE_URL: ${LLM_API_BASE_URL}
@@ -43,7 +43,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  understory-memory:
+  mycelium-memory:
 ```
 
 ```bash
@@ -93,7 +93,7 @@ Then:
 - **Web UI** → http://localhost:3800 — browse the memory, watch the graph, chat with the agent
 - **MCP endpoint** → `http://localhost:3800/mcp` (streamable HTTP) — register it in any MCP client:
   ```bash
-  claude mcp add --transport http ustory http://localhost:3800/mcp
+  claude mcp add --transport http mycelium http://localhost:3800/mcp
   ```
 - Your agent now has `memory_query` / `memory_add` / `memory_update` / `memory_status` / `memory_maintain`, and gets a seed overview of the memory at every session start.
 
@@ -145,20 +145,20 @@ Or build the container yourself: `docker compose up --build` (the repo's [docker
 Dev mode (server on :3800, Vite HMR on :5180 with proxy):
 
 ```bash
-BUNDLE_ROOT=./sample-bundle pnpm --filter @understory/server dev
-pnpm --filter @understory/web dev
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/server dev
+pnpm --filter @mycelium/web dev
 ```
 
 ## MCP registration (Claude Code / Desktop)
 
 ```bash
-claude mcp add ustory \
+claude mcp add mycelium \
   -e BUNDLE_ROOT=/path/to/your/bundle \
   -e LLM_API_BASE_URL=https://api.deepseek.com/v1 \
   -e LLM_API_KEY=sk-... \
   -e LLM_API_FORMAT=openai \
   -e LLM_MODEL=deepseek-chat \
-  -- node /path/to/understory/packages/server/dist/mcp/stdio.js
+  -- node /path/to/mycelium/packages/server/dist/mcp/stdio.js
 ```
 
 Or point an HTTP MCP client at `http://host:3800/mcp`.
@@ -174,7 +174,7 @@ AUTH_TOKEN=$(openssl rand -hex 24)
 With it set, `/mcp` and `/api` require `Authorization: Bearer <token>` (the web UI stays reachable and prompts for the token). Register authenticated MCP clients with a header:
 
 ```bash
-claude mcp add --transport http ustory http://host:3800/mcp \
+claude mcp add --transport http mycelium http://host:3800/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -201,8 +201,8 @@ This design mirrors the pattern in Karpathy's [LLM Wiki](https://gist.github.com
 ## Tests
 
 ```bash
-pnpm test                                  # core: 18 tests (spec §5/§6/§7/§9, sandbox, search, concurrency)
-pnpm --filter @understory/server exec tsx scripts/mcp-smoke.mts   # MCP stdio round-trip (needs SMOKE_BUNDLE + an API key)
+pnpm test                                  # core: 53 tests (spec §5/§6/§7/§9, sandbox, search, concurrency, hot-memory, cache, dream)
+pnpm --filter @mycelium/server exec tsx scripts/mcp-smoke.mts   # MCP stdio round-trip (needs SMOKE_BUNDLE + an API key)
 ```
 
 ## Environment

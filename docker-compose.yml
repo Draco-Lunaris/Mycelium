@@ -1,5 +1,5 @@
 services:
-  understory:
+  mycelium:
     build: .
     ports:
       - "3800:3800"

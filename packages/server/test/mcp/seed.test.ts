@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TreeNode } from "@understory/core";
+import type { TreeNode } from "@mycelium/core";
 import { deriveConceptDescription } from "../../src/mcp/seed.js";
 
 describe("seed", () => {
