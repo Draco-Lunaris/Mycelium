@@ -13,10 +13,12 @@ const WRITE_TOOLS = new Set(["write_concept", "patch_concept", "delete_concept"]
  */
 export function ChatPanel({
   config,
+  shelf,
   onMutation,
   onOpenConcept,
 }: {
   config: AppConfig | null;
+  shelf?: string;
   onMutation: () => void;
   onOpenConcept: (path: string) => void;
 }) {
@@ -26,7 +28,7 @@ export function ChatPanel({
     transport: new DefaultChatTransport({
       api: "/api/chat",
       headers: () => authHeaders(),
-      body: () => ({ model: model || undefined }),
+      body: () => ({ model: model || undefined, shelf: shelf || undefined }),
     }),
     onFinish: () => onMutation(), // refresh browse pane; agent may have written files
   });

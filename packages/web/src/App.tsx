@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, setAuthToken, type AppConfig, type Concept, type ConformanceReport, type LogEntry, type SearchHit, type TreeNode } from "./api";
+import { api, ApiError, setAuthToken, type AppConfig, type Concept, type ConformanceReport, type LogEntry, type SearchHit, type ShelfInfo, type TreeNode } from "./api";
 import { Tree } from "./components/Tree";
 import { ConceptView } from "./components/ConceptView";
 import { LogView } from "./components/LogView";
@@ -25,10 +25,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [needsToken, setNeedsToken] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  // Shelves: undefined = global store. Selected shelf scopes the browse/search/chat views.
+  const [shelf, setShelf] = useState<string | undefined>(undefined);
+  const [shelves, setShelves] = useState<ShelfInfo[]>([]);
 
   const refresh = useCallback(() => {
     api
-      .tree()
+      .tree(shelf)
       .then((t) => {
         setTree(t);
         setNeedsToken(false);
@@ -37,8 +40,20 @@ export default function App() {
         if (e instanceof ApiError && e.status === 401) setNeedsToken(true);
         else setError(String(e));
       });
-    api.validate().then(setReport).catch(() => {});
-    api.log().then(setLog).catch(() => {});
+    api.validate(shelf).then(setReport).catch(() => {});
+    api.log(shelf).then(setLog).catch(() => {});
+    api.shelves().then(setShelves).catch(() => {});
+  }, [shelf]);
+
+  // Switch store (global ↔ shelf): reset the open concept/selection so a path
+  // from the previous store isn't fetched against the new one.
+  const changeShelf = useCallback((next: string | undefined) => {
+    setShelf(next);
+    setView({ kind: "empty" });
+    setConcept(null);
+    setHits(null);
+    setQuery("");
+    setError(null);
   }, []);
 
   useEffect(() => {
@@ -48,9 +63,9 @@ export default function App() {
 
   useEffect(() => {
     if (view.kind === "concept") {
-      api.concept(view.path).then(setConcept).catch((e) => setError(String(e)));
+      api.concept(view.path, shelf).then(setConcept).catch((e) => setError(String(e)));
     }
-  }, [view]);
+  }, [view, shelf]);
 
   // Re-load the open concept (and graph) after chat mutations.
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
@@ -65,9 +80,9 @@ export default function App() {
       setHits(null);
       return;
     }
-    const t = setTimeout(() => api.search(query).then(setHits).catch(() => {}), 200);
+    const t = setTimeout(() => api.search(query, shelf).then(setHits).catch(() => {}), 200);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, shelf]);
 
   const openConcept = useCallback((path: string) => {
     if (path === "/log.md") {
@@ -134,6 +149,21 @@ export default function App() {
                 {report.conformant ? "conformant" : "non-conformant"}
               </span>
             )}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-zinc-500">Store</span>
+            <select
+              value={shelf ?? ""}
+              onChange={(e) => changeShelf(e.target.value || undefined)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm outline-none focus:border-cyan-600"
+            >
+              <option value="">global</option>
+              {shelves.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.conceptCount})
+                </option>
+              ))}
+            </select>
           </div>
           <input
             value={query}
@@ -204,14 +234,14 @@ export default function App() {
         )}
         {!error && view.kind === "log" && <LogView entries={log} onNavigate={openConcept} />}
         {!error && view.kind === "graph" && (
-          <GraphView refreshKey={graphRefreshKey} onNavigate={openConcept} />
+          <GraphView refreshKey={graphRefreshKey} shelf={shelf} onNavigate={openConcept} />
         )}
       </main>
 
       {/* Chat */}
       {chatOpen && (
         <aside className="w-96 shrink-0 border-l border-zinc-800">
-          <ChatPanel config={config} onMutation={onMutation} onOpenConcept={openConcept} />
+          <ChatPanel config={config} shelf={shelf} onMutation={onMutation} onOpenConcept={openConcept} />
         </aside>
       )}
     </div>

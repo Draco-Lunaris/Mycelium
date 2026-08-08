@@ -57,9 +57,11 @@ function traceVisits(trace: QueryTrace): { path: string; seq: number; write: boo
  */
 export function GraphView({
   refreshKey,
+  shelf,
   onNavigate,
 }: {
   refreshKey: number;
+  shelf?: string;
   onNavigate: (path: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,7 @@ export function GraphView({
   // Build / rebuild the simulation when data changes.
   useEffect(() => {
     let cancelled = false;
-    api.graph().then((graph: GraphData) => {
+    api.graph(shelf).then((graph: GraphData) => {
       if (cancelled) return;
       const width = containerRef.current?.clientWidth ?? 800;
       const height = containerRef.current?.clientHeight ?? 600;
@@ -123,12 +125,12 @@ export function GraphView({
       setLinks(simLinks);
       setView({ x: 0, y: 0, k: 1 });
     });
-    api.traces().then(setTraces).catch(() => {});
+    api.traces(shelf).then(setTraces).catch(() => {});
     return () => {
       cancelled = true;
       simRef.current?.stop();
     };
-  }, [refreshKey]);
+  }, [refreshKey, shelf]);
 
   const typeColors = useMemo(() => {
     const map = new Map<string, string>();
@@ -165,7 +167,7 @@ export function GraphView({
   }, [activeTrace]);
 
   const selectTrace = async (id: string) => {
-    const full = await api.trace(id);
+    const full = await api.trace(id, shelf);
     setActiveTrace(full);
     setProgress(0);
     setPlaying(true); // sweep the path in on selection
