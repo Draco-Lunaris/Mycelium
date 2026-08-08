@@ -4,6 +4,7 @@ import type { KnowledgeBase } from "../okf/index.js";
 import type { TreeNode } from "../okf/types.js";
 import type { TraceRecorder } from "./trace.js";
 import { recordHotDelete, recordHotWrite } from "./hot-memory.js";
+import { readPassage } from "../library/index.js";
 
 /** Bundle-relative concept path, e.g. "/tables/customers.md". */
 const conceptPath = z
@@ -27,7 +28,7 @@ const logSummary = z
     "One past-tense sentence for the update log, with bundle-relative links, e.g. 'Added [Billing API](/apis/billing-api.md).'"
   );
 
-export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
+export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder, libraryRoot?: string) {
   return {
     search_knowledge: tool({
       description:
@@ -77,6 +78,27 @@ export function buildReadTools(kb: KnowledgeBase, trace?: TraceRecorder) {
       execute: async () => {
         trace?.record("lint_knowledge", "", []);
         return kb.lint();
+      },
+    }),
+    read_passage: tool({
+      description:
+        "Read a full passage from a book in the library stacks. A catalog `Book`/`Chapter` concept has a small summary body and a `resource` field like `book://<slug>#<anchor>` — call this with that resource to fetch the full chapter/section text on demand. Do NOT assume a chapter concept's body is the whole chapter; it is only a summary — use read_passage for the full text.",
+      inputSchema: z.object({
+        resource: z
+          .string()
+          .describe("A book://<slug>#<anchor> URI, taken from a concept's `resource` field"),
+      }),
+      execute: async ({ resource }) => {
+        if (!libraryRoot) {
+          return { resource, error: "No library configured (LIBRARY_ROOT unset); cannot read passages." };
+        }
+        try {
+          const passage = await readPassage(libraryRoot, resource);
+          trace?.record("read_passage", resource, [resource]);
+          return { resource, passage };
+        } catch (err) {
+          return { resource, error: err instanceof Error ? err.message : String(err) };
+        }
       },
     }),
   };
@@ -176,4 +198,54 @@ export function formatTree(node: TreeNode, depth = 0): string {
     }
   }
   return lines.filter(Boolean).join("\n");
+}
+
+/** Count concept nodes anywhere under `node`. */
+export function countConceptsInTree(node: TreeNode): number {
+  let n = 0;
+  for (const child of node.children ?? []) {
+    if (child.kind === "concept") n++;
+    else if (child.kind === "directory") n += countConceptsInTree(child);
+  }
+  return n;
+}
+
+/**
+ * Segment-level summary for LARGE bundles (too many concepts to list each one
+ * in the system prompt): one line per top-level segment with a count, the
+ * distinct types, and the first few concept titles. Root-level concepts are
+ * listed individually. The agent then navigates via search/read tools instead
+ * of a pre-loaded tree.
+ */
+export function formatTreeCompact(node: TreeNode): string {
+  const lines: string[] = ["/"];
+  for (const child of node.children ?? []) {
+    if (child.kind === "directory") {
+      const count = countConceptsInTree(child);
+      const types = collectTypes(child);
+      const titles = collectTitles(child).slice(0, 3).join(", ");
+      const typeList = types.size ? ` (${[...types].sort().join(", ")})` : "";
+      lines.push(`${child.name}/ — ${count} concept${count === 1 ? "" : "s"}${typeList}${titles ? `: ${titles}` : ""}`);
+    } else if (child.kind === "concept") {
+      const meta = [child.type, child.description].filter(Boolean).join(" — ");
+      lines.push(`${child.name}${meta ? `  [${meta}]` : ""}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function collectTypes(node: TreeNode, set = new Set<string>()): Set<string> {
+  for (const child of node.children ?? []) {
+    if (child.kind === "concept" && child.type) set.add(child.type);
+    else if (child.kind === "directory") collectTypes(child, set);
+  }
+  return set;
+}
+
+function collectTitles(node: TreeNode, out: string[] = []): string[] {
+  for (const child of node.children ?? []) {
+    if (child.kind === "concept") out.push(child.title ?? child.name);
+    else if (child.kind === "directory") collectTitles(child, out);
+  }
+  return out;
 }

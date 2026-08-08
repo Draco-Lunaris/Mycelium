@@ -16,6 +16,7 @@ import {
   createShelf,
   importShelf,
   importBookIntoShelf,
+  importBook,
 } from "../src/index.js";
 
 function tmp(): Promise<string> {
@@ -257,3 +258,114 @@ function countConceptsInTree(node: { children?: { kind: string; children?: unkno
   }
   return n;
 }
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Build a pdf-to-markdown-style output dir: <slug>/<slug>.md + kb/<slug>/{book.md, ch-*.md, meta.json}. */
+async function makePdfOutput(workDir: string, slug: string): Promise<string> {
+  const out = path.join(workDir, slug);
+  const seg = path.join(out, "kb", slug);
+  await fs.mkdir(seg, { recursive: true });
+  await fs.writeFile(
+    path.join(out, `${slug}.md`),
+    `# ${slug} Book\n\n## Chapter One {#ch-1-intro}\n\nThe first chapter full text. A long passage about intro topics.\n\n## Chapter Two {#ch-2-next}\n\nThe second chapter full text about next topics.\n`
+  );
+  await fs.writeFile(
+    path.join(seg, "meta.json"),
+    JSON.stringify({
+      readable_book_path: path.join(out, `${slug}.md`),
+      chapter_count: 2,
+      source_pdf: `/tmp/${slug}.pdf`,
+      page_count: 100,
+      converted_at: "2026-08-08T00:00:00Z",
+    })
+  );
+  await fs.writeFile(
+    path.join(seg, "ch-1-intro.md"),
+    `---\ntype: Reference\ntitle: "Chapter 1: Intro"\ndescription: "The first chapter full text."\ntags:\n  - book:${slug}\n  - chapter\nresource: "file://${path.join(out, slug + ".md")}#ch-1-intro"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# Chapter 1: Intro\n\nThe first chapter full text. A long passage about intro topics.\n\n## Related Concepts\n\n- [${slug} (Book)](/${slug}/book.md) — the book this chapter belongs to\n- [Chapter 2](/${slug}/ch-2-next.md) — next chapter\n`
+  );
+  await fs.writeFile(
+    path.join(seg, "ch-2-next.md"),
+    `---\ntype: Reference\ntitle: "Chapter 2: Next"\ndescription: "The second chapter full text."\ntags:\n  - book:${slug}\n  - chapter\nresource: "file://${path.join(out, slug + ".md")}#ch-2-next"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# Chapter 2: Next\n\nThe second chapter full text about next topics.\n\n## Related Concepts\n\n- [${slug} (Book)](/${slug}/book.md) — the book this chapter belongs to\n- [Chapter 1](/${slug}/ch-1-intro.md) — previous chapter\n`
+  );
+  await fs.writeFile(
+    path.join(seg, "book.md"),
+    `---\ntype: Project\ntitle: "${slug} (Book)"\ndescription: "${slug}, by Jane Doe — 100 pages."\ntags:\n  - book:${slug}\n  - book\nresource: "file://${path.join(out, slug + ".md")}"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# ${slug} (Book)\n\n## About\n\n**Title:** ${slug}\n**Author:** Jane Doe\n\n## Chapters\n\n- [Chapter 1: Intro](/${slug}/ch-1-intro.md) — The first chapter full text.\n- [Chapter 2: Next](/${slug}/ch-2-next.md) — The second chapter full text.\n`
+  );
+  await fs.writeFile(
+    path.join(out, "kb", "index.md"),
+    `---\nokf_version: "0.1"\n---\n\n# Knowledge Base\n\n## Memory Segments\n\n* [${slug}](${slug}/) - 3 concepts\n`
+  );
+  await fs.writeFile(path.join(out, "kb", "log.md"), `# Directory Update Log\n\n## 2026-08-08\n\n* **Creation**: ${slug}\n`);
+  return out;
+}
+
+describe("importBook (catalog + stacks)", () => {
+  let globalRoot: string;
+  let shelvesRoot: string;
+  let libraryRoot: string;
+  let work: string;
+  let reg: ShelfRegistry;
+
+  beforeEach(async () => {
+    work = await tmp();
+    globalRoot = path.join(work, "global");
+    shelvesRoot = path.join(work, "shelves");
+    libraryRoot = path.join(work, "library");
+    await makeBundle(globalRoot);
+    reg = new ShelfRegistry(globalRoot, { shelvesRoot });
+    await reg.discover();
+  });
+
+  afterEach(async () => {
+    await fs.rm(work, { recursive: true, force: true });
+  });
+
+  it("stores the full book in the stacks and writes a lightweight catalog in the shelf", async () => {
+    const out = await makePdfOutput(work, "the-art-of-x");
+    const result = await importBook(reg, libraryRoot, out, "mylib");
+    expect(result.slug).toBe("the-art-of-x");
+    expect(result.shelfName).toBe("mylib");
+    expect(result.chapterCount).toBe(2);
+    expect(result.report.conformant).toBe(true);
+
+    // stacks: full book + meta.json stored once
+    expect(await pathExists(path.join(libraryRoot, "the-art-of-x", "the-art-of-x.md"))).toBe(true);
+    expect(await pathExists(path.join(libraryRoot, "the-art-of-x", "meta.json"))).toBe(true);
+
+    // shelf catalog segment
+    const segDir = path.join(reg.get("mylib").bundle.root, "the-art-of-x");
+    expect(await pathExists(path.join(segDir, "book.md"))).toBe(true);
+    expect(await pathExists(path.join(segDir, "ch-1-intro.md"))).toBe(true);
+
+    // catalog chapter is small, has book:// resource + read_passage pointer, NOT the full text
+    const ch1 = await fs.readFile(path.join(segDir, "ch-1-intro.md"), "utf-8");
+    expect(ch1).toContain("type: Chapter");
+    expect(ch1).toContain("book://the-art-of-x#ch-1-intro");
+    expect(ch1).toContain("read_passage(book://the-art-of-x#ch-1-intro)");
+    expect(ch1).not.toContain("A long passage about intro topics");
+
+    // book hub points at the stacks
+    const book = await fs.readFile(path.join(segDir, "book.md"), "utf-8");
+    expect(book).toContain("type: Book");
+    expect(book).toContain("book://the-art-of-x");
+  });
+
+  it("reuses the stacks copy when the same book is cataloged into a second shelf", async () => {
+    const out = await makePdfOutput(work, "shared-book");
+    await importBook(reg, libraryRoot, out, "shelf-a");
+    const { shelfName } = await importBook(reg, libraryRoot, out, "shelf-b");
+    expect(shelfName).toBe("shelf-b");
+    // both shelves have the catalog segment; stacks has one copy
+    expect(await pathExists(path.join(reg.get("shelf-a").bundle.root, "shared-book", "book.md"))).toBe(true);
+    expect(await pathExists(path.join(reg.get("shelf-b").bundle.root, "shared-book", "book.md"))).toBe(true);
+    expect(await pathExists(path.join(libraryRoot, "shared-book", "shared-book.md"))).toBe(true);
+  });
+});

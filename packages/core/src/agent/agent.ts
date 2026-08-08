@@ -8,10 +8,26 @@ import {
 } from "../providers/index.js";
 import { withFallback } from "../providers/fallback.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { buildReadTools, buildWriteTools, formatTree } from "./tools.js";
+import { buildReadTools, buildWriteTools, formatTree, formatTreeCompact, countConceptsInTree } from "./tools.js";
 import { TraceRecorder, TraceStore } from "./trace.js";
+import { resolveLibraryRoot } from "../library/index.js";
 
 const MAX_STEPS = 12;
+const LARGE_BUNDLE_THRESHOLD = 300;
+
+/**
+ * The library stacks root for `read_passage`. Process-level (sibling of the
+ * global BUNDLE_ROOT), independent of which shelf the agent is running against.
+ * Returns undefined when BUNDLE_ROOT env is unset (e.g. unit tests with a fake
+ * runner) — `read_passage` then reports no library configured.
+ */
+function libraryRootFor(): string | undefined {
+  try {
+    return resolveLibraryRoot(process.env);
+  } catch {
+    return undefined;
+  }
+}
 
 export interface AgentOptions {
   model?: string;
@@ -42,7 +58,12 @@ interface ResolvedAgentModel {
 
 async function promptContext(kb: KnowledgeBase, mode: "query" | "mutate" | "chat") {
   const [types, tree] = await Promise.all([kb.listTypes(), kb.listTree()]);
-  return { existingTypes: types, treeSummary: formatTree(tree), mode };
+  // For large bundles (e.g. a book-catalog shelf with thousands of concepts) a
+  // full tree would blow the system prompt. Use a segment-level summary instead;
+  // the agent navigates via search/read tools.
+  const treeSummary =
+    countConceptsInTree(tree) > LARGE_BUNDLE_THRESHOLD ? formatTreeCompact(tree) : formatTree(tree);
+  return { existingTypes: types, treeSummary, mode };
 }
 
 async function resolveAgentModel(
@@ -111,7 +132,7 @@ export async function runQuery(
       model: resolved.model,
       system: buildSystemPrompt(ctx),
       prompt: question,
-      tools: buildReadTools(kb, recorder),
+      tools: buildReadTools(kb, recorder, libraryRootFor()),
       stopWhen: stepCountIs(MAX_STEPS),
     });
     const trace = recorder.finalize("query", question, result.text, "success", modelChain);
@@ -141,7 +162,7 @@ export async function runMutation(
       model: resolved.model,
       system: buildSystemPrompt(ctx),
       prompt: instruction,
-      tools: { ...buildReadTools(kb, recorder), ...buildWriteTools(kb, filesChanged, recorder) },
+      tools: { ...buildReadTools(kb, recorder, libraryRootFor()), ...buildWriteTools(kb, filesChanged, recorder) },
       stopWhen: stepCountIs(MAX_STEPS),
       temperature: 0.2,
     });
@@ -198,7 +219,7 @@ export async function streamChat(
       model: resolved.model,
       system: buildSystemPrompt(ctx),
       messages,
-      tools: { ...buildReadTools(kb, recorder), ...buildWriteTools(kb, filesChanged, recorder) },
+      tools: { ...buildReadTools(kb, recorder, libraryRootFor()), ...buildWriteTools(kb, filesChanged, recorder) },
       stopWhen: stepCountIs(MAX_STEPS),
       onFinish: async ({ text }) => {
         // Persist only turns that actually touched the bundle.

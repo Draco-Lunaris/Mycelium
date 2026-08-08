@@ -5,4 +5,5 @@ export * from "./agent/hot-memory.js";
 export * from "./agent/dream.js";
 export * from "./providers/index.js";
 export * from "./shelves/index.js";
+export * from "./library/index.js";
 export * from "./util/duration.js";

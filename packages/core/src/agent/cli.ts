@@ -7,16 +7,19 @@
  *   BUNDLE_ROOT=../sample-bundle pnpm shelf import <book-slug>/kb --name mycology
  *   BUNDLE_ROOT=../sample-bundle pnpm shelf import-book <book-slug>/kb/<book-slug> --into mycology
  *   BUNDLE_ROOT=../sample-bundle pnpm shelf list
+ *   BUNDLE_ROOT=../sample-bundle pnpm book import <pdf-to-markdown-output>/<book-slug> --into library
  */
 import {
   KnowledgeBase,
   ShelfRegistry,
   resolveShelvesRoot,
+  resolveLibraryRoot,
   runQuery,
   runMutation,
   createShelf,
   importShelf,
   importBookIntoShelf,
+  importBook,
 } from "../index.js";
 
 const [mode, ...rest] = process.argv.slice(2);
@@ -27,12 +30,15 @@ function usage(): never {
   BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] tsx cli.ts shelf create <name>
   BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] tsx cli.ts shelf import <kb-dir> [--name <name>]
   BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] tsx cli.ts shelf import-book <segment-dir> --into <shelf>
-  BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] tsx cli.ts shelf list`);
+  BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] tsx cli.ts shelf list
+  BUNDLE_ROOT=<dir> [SHELVES_ROOT=<dir>] [LIBRARY_ROOT=<dir>] tsx cli.ts book import <pdf-output-dir> [--into <shelf>]`);
   process.exit(1);
 }
 
 if (mode === "shelf") {
   await runShelf(rest);
+} else if (mode === "book") {
+  await runBook(rest);
 } else if (mode === "query" || mode === "mutate") {
   const input = rest.join(" ").trim();
   const bundleRoot = process.env.BUNDLE_ROOT;
@@ -107,6 +113,46 @@ async function runShelf(args: string[]): Promise<void> {
           ? "(no shelves)"
           : list.map((s) => `${s.name}\t${s.conceptCount} concept(s)\t${s.root}`).join("\n")
       );
+    } else {
+      usage();
+    }
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+}
+
+async function runBook(args: string[]): Promise<void> {
+  const bundleRoot = process.env.BUNDLE_ROOT;
+  if (!bundleRoot) {
+    console.error("BUNDLE_ROOT env var is required");
+    process.exit(1);
+  }
+  const registry = new ShelfRegistry(bundleRoot, {
+    shelvesRoot: resolveShelvesRoot(),
+    gitAutocommit: process.env.GIT_AUTOCOMMIT === "true",
+  });
+  await registry.discover();
+  const libraryRoot = resolveLibraryRoot();
+
+  const [sub, ...rest] = args;
+  const flag = (name: string): string | undefined => {
+    const i = rest.indexOf(name);
+    return i >= 0 ? rest[i + 1] : undefined;
+  };
+
+  try {
+    if (sub === "import") {
+      const pdfDir = rest[0];
+      const into = flag("--into");
+      if (!pdfDir) usage();
+      const r = await importBook(registry, libraryRoot, pdfDir, into);
+      console.log(
+        `Imported book "${r.slug}" into shelf "${r.shelfName}" — ${r.chapterCount} chapter(s) cataloged, ` +
+          `stacks at ${r.stacksDir}. Shelf conformant: ${r.report.conformant} (${r.report.conceptCount} concepts)`
+      );
+      const errors = r.report.issues.filter((i) => i.severity === "error");
+      if (errors.length > 0) console.error(`  errors: ${errors.map((i) => i.message).join("; ")}`);
     } else {
       usage();
     }

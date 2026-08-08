@@ -15,6 +15,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 - Every concept is one .md file with YAML frontmatter. The only REQUIRED field is \`type\` (a free-form string naming the kind of thing, e.g. "BigQuery Table", "API Endpoint", "Playbook", "Decision", "How-To"). Recommended fields: \`title\`, \`description\` (one line), \`resource\` (canonical URI of the underlying asset, if any), \`tags\` (list).
 - \`index.md\` and \`log.md\` are RESERVED filenames — never create concepts with those names. They are maintained automatically by the system after your writes; you never edit them.
 - Cross-link related concepts with bundle-relative markdown links: \`[Customers table](/tables/customers.md)\`. Link liberally; broken links are tolerated.
+- **Book library (card catalog)**: some shelves catalog books. A \`Book\` or \`Chapter\` concept has a small summary body and a \`resource: book://<slug>#<anchor>\` field — the FULL text lives in the library stacks, NOT in the concept body. To read a chapter's full text, call the \`read_passage\` tool with that \`resource\`. Never assume a chapter concept's body is the whole chapter.
 - Body convention: prose first, then optional \`# Schema\`, \`# Examples\`, \`# Citations\` sections where they apply. Citations are numbered: \`[1] [Title](https://url)\`.
 
 ## Operating rules

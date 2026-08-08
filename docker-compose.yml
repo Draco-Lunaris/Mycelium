@@ -5,10 +5,12 @@ services:
       - "3800:3800"
     volumes:
       - ./sample-bundle:/bundle
-      - mycelium-shelves:/shelves
+      - ./shelves:/shelves
+      - ./library:/library
     environment:
       BUNDLE_ROOT: /bundle
       SHELVES_ROOT: /shelves
+      LIBRARY_ROOT: /library
       AUTH_TOKEN: ${AUTH_TOKEN:-}
       # Primary model
       LLM_API_BASE_URL: ${LLM_API_BASE_URL}
@@ -31,6 +33,3 @@ services:
       LOCAL_API_KEY: ${LOCAL_API_KEY:-}
       GIT_AUTOCOMMIT: ${GIT_AUTOCOMMIT:-false}
     restart: unless-stopped
-
-volumes:
-  mycelium-shelves:

@@ -171,16 +171,42 @@ BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import-book <book
 BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf list
 ```
 
-### Importing books from the `pdf-to-markdown` skill
+### Book library — catalog shelves + a separate "stacks" store
 
-The `pdf-to-markdown` skill emits a structurally identical OKF bundle at `<book-slug>/kb/` (root `index.md` + `log.md` + a per-book segment of `book.md` + `ch-N-*.md` chapter concepts; `type: Project` for the book, `type: Reference` for chapters). It drops in as a shelf with zero transformation:
+A whole book is too large to live as OKF concept bodies (search/scan and the agent's system
+prompt would scan the whole corpus). So books use a **card-catalog** pattern: the **full book
+text lives once in the library stacks**, and a shelf holds lightweight **catalog concepts**
+that point into it. The agent fetches a chapter's full text **on demand** via a `read_passage`
+tool — it never loads the whole book.
+
+- **Stacks** (`LIBRARY_ROOT`, default a `library/` dir sibling to `BUNDLE_ROOT`): one copy per book
+  at `library/<book-slug>/<book-slug>.md` (+ `figures/` + `meta.json`). A book is stored once and
+  can be cataloged in any number of shelves. NOT an OKF bundle — it never touches the shelf
+  structure.
+- **Catalog** (in a shelf): a `Book` hub + `Chapter` concepts with the sidecar's ≤200-char summary,
+  a `## Full passage` pointer, and `resource: book://<book-slug>#<chapter-anchor>`. The shelf stays
+  small (summaries only); `validate`/`graph`/`search` run over the catalog, not the corpus.
+- **`read_passage`**: an internal agent tool that resolves `book://<slug>#<anchor>` to the stacks
+  file and returns just that chapter's section. The agent searches the catalog, reads a chapter
+  concept, then calls `read_passage` for the full text only when it needs the detail.
+
+Large catalog shelves (>$300 concepts) automatically get a compact, segment-level system prompt
+(search-first) so the prompt never lists every concept.
+
+#### Importing a book
 
 ```bash
-# after: pdf-to-markdown produces out/the-art-of-x/kb/
-BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import out/the-art-of-x/kb --name art
+# after: pdf-to-markdown produces out/<book-slug>/  (<book-slug>.md + kb/ + figures/ + raw/)
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core book import out/<book-slug> --into library
 ```
 
-Chapter `resource` fields deep-link into the readable book (`file://.../the-art-of-x.md#ch-3-...`); links are absolute-from-bundle-root so they stay valid inside the shelf.
+This stores the full book in the stacks and writes the catalog into the `library` shelf (created
+if needed). Re-running into a different shelf reuses the same stacks copy. Query it with
+`memory_query({question:"what does <book> say about <topic>?", shelf:"library"})` — the agent
+searches the catalog and fetches the relevant chapter via `read_passage`.
+
+> The older `shelf import` / `shelf import-book` path (which copies a full-text OKF sidecar into a
+> shelf) still exists for non-book bundles, but `book import` is the recommended path for books.
 
 ## MCP registration (Claude Code / Desktop)
 
