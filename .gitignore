@@ -6,8 +6,9 @@ dist/
 .DS_Store
 coverage/
 demo-bundle/
-# runtime data — keep the project folder a clean checkout (named volumes in
-# docker-compose.yml; these should never appear, but ignore as a backstop)
-library/
-shelves/
+# runtime data — keep the project folder a clean checkout. Root-anchored so
+# they only match the repo-root runtime dirs, NOT the source packages
+# (packages/core/src/shelves, packages/core/src/library).
+/library/
+/shelves/
 **/.traces/
