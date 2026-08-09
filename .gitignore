@@ -12,3 +12,6 @@ demo-bundle/
 /library/
 /shelves/
 **/.traces/
+# Rendered Caddy gateway config — contains generated secrets, keep local.
+# The template (deploy/Caddyfile.template) IS committed; this rendered file is not.
+deploy/Caddyfile
