@@ -128,6 +128,12 @@ claude mcp add mycelium -s user --transport http http://<host>:3800/mcp \
 
 Open the web UI at `http://<host>:3800` and sign in with the printed Basic-Auth credentials.
 
+<details><summary>Clean URL (no port suffix)</summary>
+
+Set `MYCELIUM_PORT=80` in `.env` before running `setup-gateway.sh` so Caddy binds the standard HTTP port and the URL becomes `http://<host>` (no `:3800`). The `claude mcp add` URL drops the port too: `http://<host>/mcp`.
+
+</details>
+
 ## Stack
 
 pnpm monorepo:

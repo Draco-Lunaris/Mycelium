@@ -22,7 +22,7 @@
     admin off
 }
 
-:3800 {
+:__MYCELIUM_PORT__ {
     handle /mcp* {
         @unauth not header Authorization "Bearer __MYCELIUM_API_KEY__"
         handle @unauth {

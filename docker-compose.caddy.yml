@@ -40,8 +40,10 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    # Public port for the gateway. Default 3800; set MYCELIUM_PORT=80 in .env
+    # for a clean URL (http://<host>) without a port suffix.
     ports:
-      - "3800:3800"
+      - "${MYCELIUM_PORT:-3800}:${MYCELIUM_PORT:-3800}"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
