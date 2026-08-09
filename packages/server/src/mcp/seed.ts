@@ -57,8 +57,12 @@ export async function buildSeedMemory(kb: KnowledgeBase, registry?: ShelfRegistr
   if (registry && registry.shelfNames.length > 0) {
     const shelves = await registry.list();
     const shelfLines =
-      shelves.map((s) => `* ${s.name} — ${s.conceptCount} concept${s.conceptCount === 1 ? "" : "s"}`).join("\n") ||
-      "(none)";
+      shelves
+        .map((s) => {
+          const cnt = `${s.conceptCount} concept${s.conceptCount === 1 ? "" : "s"}`;
+          return s.description ? `* ${s.name} — ${s.description} (${cnt})` : `* ${s.name} — ${cnt}`;
+        })
+        .join("\n") || "(none)";
     sections.unshift(
       `Shelves (independent topic stores — pass shelf="<name>" to scope a tool to one):\n${shelfLines}`
     );

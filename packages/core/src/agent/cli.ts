@@ -88,7 +88,10 @@ async function runShelf(args: string[]): Promise<void> {
     if (sub === "create") {
       const name = rest[0];
       if (!name) usage();
-      const kb = await createShelf(registry, name);
+      const kb = await createShelf(registry, name, {
+        description: flag("--description"),
+        topic: flag("--topic"),
+      });
       console.log(`Created shelf "${name}" at ${kb.bundle.root}`);
     } else if (sub === "import") {
       const kbDir = rest[0];
@@ -145,8 +148,10 @@ async function runBook(args: string[]): Promise<void> {
     if (sub === "import") {
       const pdfDir = rest[0];
       const into = flag("--into");
+      const description = flag("--description");
+      const topic = flag("--topic");
       if (!pdfDir) usage();
-      const r = await importBook(registry, libraryRoot, pdfDir, into);
+      const r = await importBook(registry, libraryRoot, pdfDir, into, { description, topic });
       console.log(
         `Imported book "${r.slug}" into shelf "${r.shelfName}" — ${r.chapterCount} chapter(s) cataloged, ` +
           `stacks at ${r.stacksDir}. Shelf conformant: ${r.report.conformant} (${r.report.conceptCount} concepts)`

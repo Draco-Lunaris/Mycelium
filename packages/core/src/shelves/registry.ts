@@ -1,12 +1,17 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { KnowledgeBase, type KnowledgeBaseOptions } from "../okf/index.js";
+import { parseDoc } from "../okf/frontmatter.js";
 import type { TreeNode } from "../okf/types.js";
 
 export interface ShelfInfo {
   name: string;
   root: string;
   conceptCount: number;
+  /** Shelf description from its info.md (if any); used by the seed for routing. */
+  description?: string;
+  /** Shelf topic from its info.md (if any). */
+  topic?: string;
 }
 
 /** Thrown when a caller asks for a shelf that isn't registered/on disk. */
@@ -129,7 +134,16 @@ async function shelfInfo(name: string, kb: KnowledgeBase): Promise<ShelfInfo> {
   } catch {
     // empty/non-conforming shelf → 0
   }
-  return { name, root: kb.bundle.root, conceptCount };
+  const info: Pick<ShelfInfo, "description" | "topic"> = {};
+  try {
+    const raw = await fs.readFile(path.join(kb.bundle.root, "info.md"), "utf-8");
+    const fm = parseDoc(raw).frontmatter as Record<string, unknown>;
+    if (typeof fm.description === "string" && fm.description) info.description = fm.description;
+    if (typeof fm.topic === "string" && fm.topic) info.topic = fm.topic;
+  } catch {
+    // no info.md (pre-info.md shelf) → no description; seed falls back to count
+  }
+  return { name, root: kb.bundle.root, conceptCount, ...info };
 }
 
 function countConcepts(node: TreeNode): number {

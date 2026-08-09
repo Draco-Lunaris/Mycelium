@@ -190,23 +190,32 @@ tool — it never loads the whole book.
   file and returns just that chapter's section. The agent searches the catalog, reads a chapter
   concept, then calls `read_passage` for the full text only when it needs the detail.
 
-Large catalog shelves (>$300 concepts) automatically get a compact, segment-level system prompt
+Large catalog shelves (>300 concepts) automatically get a compact, segment-level system prompt
 (search-first) so the prompt never lists every concept.
 
 #### Importing a book
 
 ```bash
 # after: pdf-to-markdown produces out/<book-slug>/  (<book-slug>.md + kb/ + figures/ + raw/)
-BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core book import out/<book-slug> --into library
+BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core book import out/<book-slug> \
+  --into <topic-shelf> --description "What this shelf covers (the agent routes by this)."
 ```
 
-This stores the full book in the stacks and writes the catalog into the `library` shelf (created
-if needed). Re-running into a different shelf reuses the same stacks copy. Query it with
-`memory_query({question:"what does <book> say about <topic>?", shelf:"library"})` — the agent
-searches the catalog and fetches the relevant chapter via `read_passage`.
+This stores the full book **once** in the shared stacks and writes the catalog into the named
+**topic shelf** (created if needed, with an `info.md` describing it). Re-importing the same book
+into another shelf reuses the one stacks copy — so all books live in a **single store**, while the
+**catalog references are divided into shelves** (one per topic/collection). A book can be cataloged
+in any number of shelves.
 
-> The older `shelf import` / `shelf import-book` path (which copies a full-text OKF sidecar into a
-> shelf) still exists for non-book bundles, but `book import` is the recommended path for books.
+Each shelf has an `info.md` (topic + description); the session seed lists shelves with their
+descriptions so the agent routes to the right one. Query with
+`memory_query({question:"…", shelf:"<topic-shelf>"})` — the agent searches that shelf's catalog and
+fetches the relevant chapter via `read_passage`.
+
+> Don't dump every book into one shelf — divide the catalog across topic shelves so each stays
+> small enough (low thousands of concepts) for the in-memory scan. The full text in the stacks is
+> shared regardless. The older `shelf import` / `shelf import-book` path (full-text OKF sidecar
+> into a shelf) still exists for non-book bundles, but `book import` is the recommended path.
 
 ## MCP registration (Claude Code / Desktop)
 

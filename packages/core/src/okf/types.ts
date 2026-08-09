@@ -60,4 +60,4 @@ export interface ConformanceReport {
   issues: ConformanceIssue[];
 }
 
-export const RESERVED_FILENAMES = new Set(["index.md", "log.md"]);
+export const RESERVED_FILENAMES = new Set(["index.md", "log.md", "info.md"]);
