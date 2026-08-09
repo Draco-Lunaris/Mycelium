@@ -1,0 +1,57 @@
+# Gated deployment: mycelium (internal) behind a Caddy auth gateway on :3800.
+#
+# Secrets live only in deploy/Caddyfile (gitignored), rendered from
+# deploy/Caddyfile.template by deploy/setup-gateway.sh. The app's own
+# AUTH_TOKEN is intentionally left unset — Caddy is the sole auth boundary.
+#
+# Usage:
+#   cp .env.example .env          # fill in LLM_* config
+#   bash deploy/setup-gateway.sh  # generates credentials, renders deploy/Caddyfile
+#   docker compose -f docker-compose.caddy.yml up -d --build
+#
+# Prefer the prebuilt image? Swap `build: .` for
+#   image: ghcr.io/draco-lunaris/mycelium:latest
+services:
+  mycelium:
+    build: .
+    # Internal only — Caddy is the public front door. No host port published.
+    expose:
+      - "3800"
+    volumes:
+      - ./sample-bundle:/bundle
+      - mycelium-shelves:/shelves
+      - mycelium-library:/library
+    environment:
+      BUNDLE_ROOT: /bundle
+      SHELVES_ROOT: /shelves
+      LIBRARY_ROOT: /library
+      # AUTH_TOKEN is deliberately unset: Caddy enforces auth on /mcp and /api.
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_API_FORMAT: ${LLM_API_FORMAT:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_FALLBACK_API_BASE_URL: ${LLM_FALLBACK_API_BASE_URL:-}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_API_FORMAT: ${LLM_FALLBACK_API_FORMAT:-openai}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      LLM_FALLBACK_ALLOW_FOR: ${LLM_FALLBACK_ALLOW_FOR:-query}
+      GIT_AUTOCOMMIT: ${GIT_AUTOCOMMIT:-false}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "3800:3800"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mycelium
+    restart: unless-stopped
+
+volumes:
+  mycelium-shelves:
+  mycelium-library:
+  caddy_data:
+  caddy_config:

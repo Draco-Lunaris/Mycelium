@@ -99,6 +99,35 @@ Then:
 
 Teach it something (`memory_add`: "We deploy on Fridays, never Mondays"), then open the graph and watch the concept wire itself in. Deploying with Portainer? Use [docker-compose.portainer.yml](docker-compose.portainer.yml) as a repository stack.
 
+### Auth gateway (Caddy)
+
+The quick-start stack above is open — fine for localhost or a trusted LAN. To expose Mycelium on a network you don't fully trust, put it behind the bundled Caddy auth gateway. [`docker-compose.caddy.yml`](docker-compose.caddy.yml) runs Mycelium on an internal network only and puts Caddy on `:3800` as the public front door:
+
+| Path | Auth |
+|---|---|
+| `/mcp*` | **Bearer API key** only (MCP clients — Claude Code, etc.) |
+| `/api*` | **Bearer API key *or* Basic Auth** (scripts use the key; the browser UI uses Basic, and its XHRs carry Basic here) |
+| `/` (web UI) | **Basic Auth** only |
+
+The app's own `AUTH_TOKEN` is left **unset** — Caddy is the sole auth boundary, so the browser's Basic header passes through to the app untouched. `flush_interval -1` keeps MCP (SSE) and chat streaming unbuffered.
+
+**No secrets live in the repo.** The Caddyfile is a [template](deploy/Caddyfile.template); [`deploy/setup-gateway.sh`](deploy/setup-gateway.sh) generates a bearer API key + a Basic-Auth UI password, bcrypt-hashes the password (using the same `caddy:2-alpine` image the stack runs — no host install needed), and renders the real `deploy/Caddyfile` (gitignored). Credentials are written to your local `.env` (also gitignored) so re-running the script preserves them.
+
+```bash
+cp .env.example .env            # fill in your LLM_* config
+bash deploy/setup-gateway.sh    # prints the API key + UI user/password
+docker compose -f docker-compose.caddy.yml up -d --build
+```
+
+Then register an MCP client with the printed bearer key:
+
+```bash
+claude mcp add mycelium -s user --transport http http://<host>:3800/mcp \
+  --header "Authorization: Bearer <MYCELIUM_API_KEY>"
+```
+
+Open the web UI at `http://<host>:3800` and sign in with the printed Basic-Auth credentials.
+
 ## Stack
 
 pnpm monorepo:

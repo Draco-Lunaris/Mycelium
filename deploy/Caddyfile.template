@@ -1,0 +1,63 @@
+# Caddy auth gateway for Mycelium — TEMPLATE (no secrets).
+#
+# Rendered to deploy/Caddyfile by deploy/setup-gateway.sh, which substitutes:
+#   __MYCELIUM_API_KEY__   bearer token for /mcp + /api
+#   __UI_USER__            Basic Auth username for the web UI
+#   __UI_PASS_HASH__       bcrypt hash of the UI password
+#   __MYCELIUM_UPSTREAM__  address of the mycelium service (e.g. mycelium:3800)
+#
+# The rendered deploy/Caddyfile is gitignored — secrets stay local.
+#
+# Auth model:
+#   /mcp*   -> bearer API key only        (MCP clients, e.g. Claude Code)
+#   /api*   -> bearer API key OR Basic Auth (scripts use the key; the browser UI
+#              authenticates with Basic and its XHRs carry Basic to /api)
+#   /       -> Basic Auth only            (the web UI)
+#
+# The mycelium app's own AUTH_TOKEN is left UNSET — Caddy is the sole auth
+# boundary, so the browser's Basic header passes through to the app untouched.
+# flush_interval -1 disables buffering so MCP (SSE) and chat streaming work.
+
+{
+    admin off
+}
+
+:3800 {
+    handle /mcp* {
+        @unauth not header Authorization "Bearer __MYCELIUM_API_KEY__"
+        handle @unauth {
+            respond "Unauthorized" 401
+        }
+        handle {
+            reverse_proxy __MYCELIUM_UPSTREAM__ {
+                flush_interval -1
+            }
+        }
+    }
+
+    handle /api* {
+        @bearer header Authorization "Bearer __MYCELIUM_API_KEY__"
+        handle @bearer {
+            reverse_proxy __MYCELIUM_UPSTREAM__ {
+                flush_interval -1
+            }
+        }
+        handle {
+            basic_auth {
+                __UI_USER__ __UI_PASS_HASH__
+            }
+            reverse_proxy __MYCELIUM_UPSTREAM__ {
+                flush_interval -1
+            }
+        }
+    }
+
+    handle {
+        basic_auth {
+            __UI_USER__ __UI_PASS_HASH__
+        }
+        reverse_proxy __MYCELIUM_UPSTREAM__ {
+            flush_interval -1
+        }
+    }
+}
