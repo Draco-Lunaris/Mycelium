@@ -5,8 +5,8 @@ services:
       - "3800:3800"
     volumes:
       - ./sample-bundle:/bundle
-      - ./shelves:/shelves
-      - ./library:/library
+      - mycelium-shelves:/shelves
+      - mycelium-library:/library
     environment:
       BUNDLE_ROOT: /bundle
       SHELVES_ROOT: /shelves
@@ -33,3 +33,7 @@ services:
       LOCAL_API_KEY: ${LOCAL_API_KEY:-}
       GIT_AUTOCOMMIT: ${GIT_AUTOCOMMIT:-false}
     restart: unless-stopped
+
+volumes:
+  mycelium-shelves:
+  mycelium-library:
