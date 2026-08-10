@@ -33,6 +33,7 @@ if [ -z "${UI_PASS:-}" ]; then
   UI_PASS="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)"
 fi
 MYCELIUM_UPSTREAM="${MYCELIUM_UPSTREAM:-mycelium:3800}"
+MYCELIUM_PORT="${MYCELIUM_PORT:-3800}"
 
 # bcrypt-hash the UI password using the same Caddy image the stack runs,
 # so no host-level Caddy install is required.
@@ -51,6 +52,7 @@ sed \
   -e "s|__UI_USER__|${UI_USER}|g" \
   -e "s|__UI_PASS_HASH__|${UI_PASS_HASH}|g" \
   -e "s|__MYCELIUM_UPSTREAM__|${MYCELIUM_UPSTREAM}|g" \
+  -e "s|__MYCELIUM_PORT__|${MYCELIUM_PORT}|g" \
   "$TPL" > "$OUT"
 chmod 600 "$OUT"
 
@@ -67,6 +69,7 @@ update_env() {
 update_env MYCELIUM_API_KEY "$MYCELIUM_API_KEY"
 update_env UI_USER "$UI_USER"
 update_env UI_PASS "$UI_PASS"
+update_env MYCELIUM_PORT "$MYCELIUM_PORT"
 
 echo "Rendered $OUT (mode 600)."
 echo "---------------- CREDENTIALS (save these) ----------------"
@@ -77,7 +80,8 @@ echo "UI_PASS          = $UI_PASS"
 echo "  -> Basic Auth for the web UI at /"
 echo "---------------------------------------------------------"
 echo
+echo "Gateway port: $MYCELIUM_PORT  (set MYCELIUM_PORT=80 in .env for a clean URL with no port)"
 echo "Next: docker compose -f docker-compose.caddy.yml up -d --build"
 echo "Then register an MCP client:"
-echo "  claude mcp add mycelium -s user --transport http http://<host>:3800/mcp \\"
+echo "  claude mcp add mycelium -s user --transport http http://<host>:$MYCELIUM_PORT/mcp \\"
 echo "    --header \"Authorization: Bearer $MYCELIUM_API_KEY\""
