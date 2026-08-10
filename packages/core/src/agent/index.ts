@@ -4,3 +4,5 @@ export { buildSystemPrompt } from "./system-prompt.js";
 export { buildReadTools, buildWriteTools, formatTree } from "./tools.js";
 export { TraceRecorder, TraceStore, buildNotation } from "./trace.js";
 export type { QueryTrace, TraceStep, TraceOutcome } from "./trace.js";
+export { activity, ActivityTracker } from "./activity.js";
+export type { ActiveOp, ActivitySnapshot, ActivityKind } from "./activity.js";

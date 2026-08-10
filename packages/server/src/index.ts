@@ -7,6 +7,7 @@ import { ShelfRegistry, resolveFallbackConfig, resolveModelConfig, resolveShelve
 import { mcpRouter } from "./mcp/http.js";
 import { browseRouter } from "./api/browse.js";
 import { chatRouter } from "./api/chat.js";
+import { activityRouter } from "./api/activity.js";
 import { bearerAuth } from "./auth.js";
 import { startDreamer } from "./dreamer.js";
 
@@ -77,6 +78,7 @@ if (authToken) {
 app.use("/mcp", mcpRouter(registry));
 app.use("/api", browseRouter(registry));
 app.use("/api", chatRouter(registry));
+app.use("/api", activityRouter());
 
 // Serve the built web UI in production (single container), with SPA fallback.
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");

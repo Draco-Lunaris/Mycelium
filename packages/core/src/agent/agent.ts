@@ -10,6 +10,7 @@ import { withFallback } from "../providers/fallback.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { buildReadTools, buildWriteTools, formatTree, formatTreeCompact, countConceptsInTree } from "./tools.js";
 import { TraceRecorder, TraceStore } from "./trace.js";
+import { activity } from "./activity.js";
 import { resolveLibraryRoot } from "../library/index.js";
 
 const MAX_STEPS = 12;
@@ -125,6 +126,7 @@ export async function runQuery(
   const ctx = await promptContext(kb, "query");
   const recorder = new TraceRecorder();
   let modelChain: string[] = [];
+  const actId = activity.start("query", { shelf: kb.bundle.root, label: question });
   try {
     const resolved = await resolveAgentModel(options, "query");
     modelChain = resolved.modelChain;
@@ -142,6 +144,8 @@ export async function runQuery(
     const trace = recorder.finalize("query", question, errorMessage(err), "failed", modelChain);
     await traceStore(kb).save(trace);
     throw err;
+  } finally {
+    activity.end(actId);
   }
 }
 
@@ -155,6 +159,7 @@ export async function runMutation(
   const recorder = new TraceRecorder();
   const filesChanged = new Set<string>();
   let modelChain: string[] = [];
+  const actId = activity.start("mutate", { shelf: kb.bundle.root, label: instruction });
   try {
     const resolved = await resolveAgentModel(options, "mutate");
     modelChain = resolved.modelChain;
@@ -189,6 +194,8 @@ export async function runMutation(
     const trace = recorder.finalize("mutation", instruction, message, "failed", modelChain);
     await traceStore(kb).save(trace);
     return { ok: false, status: "failed", error: message };
+  } finally {
+    activity.end(actId);
   }
 }
 
@@ -211,6 +218,7 @@ export async function streamChat(
           ?.map((part) => (part.type === "text" ? part.text : ""))
           .join(" ")
           .trim() ?? "(chat)";
+  const actId = activity.start("chat", { shelf: kb.bundle.root, label: input });
 
   try {
     const resolved = await resolveAgentModel(options, "chat");
@@ -222,6 +230,8 @@ export async function streamChat(
       tools: { ...buildReadTools(kb, recorder, libraryRootFor()), ...buildWriteTools(kb, filesChanged, recorder) },
       stopWhen: stepCountIs(MAX_STEPS),
       onFinish: async ({ text }) => {
+        // Mark the run done first, so a save failure can't strand an active entry.
+        activity.end(actId);
         // Persist only turns that actually touched the bundle.
         if (recorder.steps.length > 0) {
           await traceStore(kb).save(recorder.finalize("chat", input, text, "success", modelChain));
@@ -230,6 +240,9 @@ export async function streamChat(
     });
     return { result, filesChanged };
   } catch (err) {
+    // Setup error before the stream started — end now. (Mid-stream errors are
+    // reclaimed by the tracker's TTL prune; we can't hook them without consuming the stream.)
+    activity.end(actId);
     const outcome = filesChanged.size > 0 ? "partial" : "failed";
     await traceStore(kb).save(recorder.finalize("chat", input, errorMessage(err), outcome, modelChain));
     throw err;

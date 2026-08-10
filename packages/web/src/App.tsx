@@ -5,6 +5,8 @@ import { ConceptView } from "./components/ConceptView";
 import { LogView } from "./components/LogView";
 import { ChatPanel } from "./components/ChatPanel";
 import { GraphView } from "./components/GraphView";
+import { useApiActivity } from "./hooks/useApiActivity";
+import { useAgentActivity } from "./hooks/useAgentActivity";
 
 type View =
   | { kind: "concept"; path: string }
@@ -28,6 +30,21 @@ export default function App() {
   // Shelves: undefined = global store. Selected shelf scopes the browse/search/chat views.
   const [shelf, setShelf] = useState<string | undefined>(undefined);
   const [shelves, setShelves] = useState<ShelfInfo[]>([]);
+
+  // Activity indicators: browse in-flight (web fetches) + server-side agent ops
+  // (includes runs triggered by external MCP clients). See hooks for details.
+  const apiActivity = useApiActivity();
+  const agentActivity = useAgentActivity();
+  const agentLabel = (() => {
+    const a = agentActivity;
+    if (a.count === 0) return "";
+    if (a.count === 1) {
+      const op = a.active[0];
+      const shelfName = op.shelf?.split("/").filter(Boolean).pop();
+      return `agent: ${op.kind}${shelfName ? ` · ${shelfName}` : ""}`;
+    }
+    return `agent: ${a.count} running`;
+  })();
 
   const refresh = useCallback(() => {
     api
@@ -131,7 +148,22 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen flex-col">
+      {/* Activity status strip — always present so lighting it never shifts layout. */}
+      <div className="flex h-6 items-center gap-2 border-b border-zinc-800 bg-zinc-950 px-3 text-[11px]">
+        {agentActivity.count > 0 ? (
+          <>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
+            <span className="text-cyan-300">{agentLabel}</span>
+          </>
+        ) : apiActivity.count > 0 ? (
+          <>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500" />
+            <span className="text-zinc-400">loading…</span>
+          </>
+        ) : null}
+      </div>
+      <div className="flex flex-1 min-h-0">
       {/* Sidebar */}
       <aside className="flex w-72 shrink-0 flex-col border-r border-zinc-800">
         <div className="border-b border-zinc-800 p-3">
@@ -195,7 +227,7 @@ export default function App() {
               onSelect={openConcept}
             />
           ) : (
-            <p className="px-2 text-xs text-zinc-500">Loading…</p>
+            <p className="animate-pulse px-2 text-xs text-zinc-500">Loading…</p>
           )}
         </div>
 
@@ -244,6 +276,7 @@ export default function App() {
           <ChatPanel config={config} shelf={shelf} onMutation={onMutation} onOpenConcept={openConcept} />
         </aside>
       )}
+      </div>
     </div>
   );
 }
