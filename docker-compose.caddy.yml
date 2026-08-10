@@ -7,13 +7,13 @@
 # Usage:
 #   cp .env.example .env          # fill in LLM_* config
 #   bash deploy/setup-gateway.sh  # generates credentials, renders deploy/Caddyfile
-#   docker compose -f docker-compose.caddy.yml up -d --build
+#   docker compose -f docker-compose.caddy.yml up -d
 #
-# Prefer the prebuilt image? Swap `build: .` for
-#   image: ghcr.io/draco-lunaris/mycelium:latest
+# The mycelium service pulls the prebuilt image from GHCR. To build from
+# local source instead (dev), swap it back to `build: .`.
 services:
   mycelium:
-    build: .
+    image: ghcr.io/draco-lunaris/mycelium:latest
     # Internal only — Caddy is the public front door. No host port published.
     expose:
       - "3800"
