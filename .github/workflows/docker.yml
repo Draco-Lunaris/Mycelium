@@ -1,5 +1,6 @@
 name: Build and publish container
 
+# Triggers: push to main / version tags, PRs to main, and manual dispatch.
 on:
   push:
     branches: [main]
