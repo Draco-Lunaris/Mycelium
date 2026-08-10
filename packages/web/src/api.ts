@@ -83,6 +83,19 @@ export interface ShelfInfo {
   conceptCount: number;
 }
 
+export interface ActivityOp {
+  id: number;
+  kind: "query" | "mutate" | "chat";
+  shelf?: string;
+  label?: string;
+  startedAt: number;
+}
+
+export interface ActivitySnapshot {
+  active: ActivityOp[];
+  count: number;
+}
+
 const TOKEN_KEY = "mycelium-token";
 
 export function getAuthToken(): string {
@@ -107,10 +120,40 @@ export class ApiError extends Error {
   }
 }
 
+// --- Browse in-flight store (drives the global browse spinner via useSyncExternalStore) ---
+// getSnapshot must return a stable reference when nothing changed, so the snapshot
+// object is rebuilt only when the in-flight set actually changes.
+const inflight = new Set<string>();
+const apiListeners = new Set<() => void>();
+let apiSnapshot: { count: number; labels: string[] } = { count: 0, labels: [] };
+
+function emitApiActivity(): void {
+  apiSnapshot = { count: inflight.size, labels: [...inflight] };
+  for (const cb of apiListeners) cb();
+}
+
+export function subscribeApiActivity(cb: () => void): () => void {
+  apiListeners.add(cb);
+  return () => {
+    apiListeners.delete(cb);
+  };
+}
+
+export function getApiActivitySnapshot(): { count: number; labels: string[] } {
+  return apiSnapshot;
+}
+
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: authHeaders() });
-  if (!res.ok) throw new ApiError(res.status, `${res.status} ${await res.text()}`);
-  return res.json();
+  const added = !inflight.has(url);
+  inflight.add(url);
+  if (added) emitApiActivity();
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, `${res.status} ${await res.text()}`);
+    return res.json();
+  } finally {
+    if (inflight.delete(url)) emitApiActivity();
+  }
 }
 
 /** Append an optional `shelf` query param to a URL (handles ? vs &). */
@@ -135,3 +178,13 @@ export const api = {
     get<QueryTrace>(withShelf(`/api/trace?id=${encodeURIComponent(id)}`, shelf)),
   config: () => get<AppConfig>("/api/config"),
 };
+
+/**
+ * Fetch the agent-activity snapshot directly, bypassing the browse in-flight
+ * store (this is polled meta-traffic and must NOT light the browse spinner).
+ */
+export async function fetchActivity(): Promise<ActivitySnapshot> {
+  const res = await fetch("/api/activity", { headers: authHeaders() });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${await res.text()}`);
+  return res.json();
+}

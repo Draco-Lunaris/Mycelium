@@ -15,3 +15,5 @@ demo-bundle/
 # Rendered Caddy gateway config — contains generated secrets, keep local.
 # The template (deploy/Caddyfile.template) IS committed; this rendered file is not.
 deploy/Caddyfile
+# Playwright MCP browser-session artifacts (snapshots/console logs), local only.
+.playwright-mcp/
