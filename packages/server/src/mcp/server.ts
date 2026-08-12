@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   runMutation,
   runQueryCached,
+  resolveLibraryRoot,
+  ingestBook,
   type KnowledgeBase,
   type MutationOutcome,
   type ShelfRegistry,
@@ -33,6 +35,15 @@ function errorReply(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
+/** Resolve the library stacks root, tolerating an unset BUNDLE_ROOT (e.g. tests). */
+function tryLibraryRoot(): string | undefined {
+  try {
+    return resolveLibraryRoot(process.env);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Build the OKF MCP server. Each knowledge tool internally drives the LLM
  * agent (OKF spec in its system prompt) against a single bundle. A `shelf`
@@ -47,7 +58,8 @@ function errorReply(message: string) {
  * tool description (universal fallback). Without it the client model has no
  * signal that memory might hold an answer.
  */
-export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer> {
+export async function buildMcpServer(registry: ShelfRegistry, libraryRoot?: string): Promise<McpServer> {
+  const libRoot = libraryRoot ?? tryLibraryRoot();
   // Seed generation must never prevent the server from starting — a missing
   // or empty bundle root degrades to a minimal seed, not a crash.
   const seed = await buildSeedMemory(registry.global, registry).catch((err: Error) => {
@@ -288,6 +300,72 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
           },
         ],
       };
+    }
+  );
+
+  server.registerTool(
+    "memory_ingest_book",
+    {
+      title: "Ingest a book",
+      description:
+        "Ingest a book's markdown into the mycelium library. Stores the full text once in the library stacks, " +
+        "then an internal librarian agent derives the chapter outline (via read_passage), writes <=200-char " +
+        "per-chapter summaries, decides/creates the topic shelf(ves), and writes lightweight Book/Chapter " +
+        "catalog concepts (with book://<slug>#<anchor> resources + read_passage pointers) into each shelf. " +
+        "The full text is NOT copied into any shelf — read_passage fetches passages on demand. Books go on " +
+        "topic shelves, not the global shelf; a book may be cataloged on more than one topic shelf. The " +
+        "markdown's chapter headings must carry {#ch-N-<slug>} GFM anchor IDs for read_passage to resolve.",
+      inputSchema: {
+        markdown: z
+          .string()
+          .describe("The full book text as GFM markdown. Chapter headings must carry {#ch-N-<slug>} IDs."),
+        title: z.string().optional().describe("Book title. If omitted, derived from the first H1 in the markdown."),
+        slug: z.string().optional().describe("Book slug (kebab-case). If omitted, derived from the title."),
+        shelf: z
+          .string()
+          .optional()
+          .describe(
+            "A single target topic shelf. If omitted, the librarian routes the book (possibly to multiple shelves)."
+          ),
+        topic: z.string().optional().describe("Topic phrase for a newly created shelf's info.md."),
+        description: z.string().optional().describe("Description for a newly created shelf's info.md."),
+      },
+    },
+    async ({ markdown, title, slug, shelf, topic, description }) => {
+      if (!libRoot) {
+        return errorReply("No library configured (LIBRARY_ROOT unset); cannot ingest books.");
+      }
+      try {
+        const result = await ingestBook(registry, libRoot, markdown, { title, slug, shelf, topic, description });
+        await refreshSeed();
+        const shelfLines = result.shelves.map((s) => {
+          const status = s.skipped
+            ? `skipped (${s.skipped})`
+            : `${s.created ? "created" : "reused"}, ${s.conceptCount} concept(s), conformant=${s.conformant}`;
+          return `- shelf "${s.shelf}": ${status}`;
+        });
+        const summaries = result.shelves
+          .filter((s) => s.outcome)
+          .map((s) => {
+            const o = s.outcome!;
+            return o.ok ? o.result.summary : o.error;
+          })
+          .join("\n");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `Ingested book "${result.slug}" (title: "${result.title}").\n` +
+                `Stacks: ${result.stacksFile}\n` +
+                `${shelfLines.join("\n") || "- no shelves"}` +
+                (summaries ? `\n\n${summaries}` : ""),
+            },
+          ],
+        };
+      } catch (err) {
+        return errorReply(`Book ingest failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   );
 

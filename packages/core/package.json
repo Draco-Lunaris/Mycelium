@@ -16,8 +16,7 @@
     "test": "vitest run",
     "agent:query": "tsx src/agent/cli.ts query",
     "agent:mutate": "tsx src/agent/cli.ts mutate",
-    "shelf": "tsx src/agent/cli.ts shelf",
-    "book": "tsx src/agent/cli.ts book"
+    "shelf": "tsx src/agent/cli.ts shelf"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.0",
