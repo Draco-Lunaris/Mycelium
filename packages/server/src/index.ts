@@ -63,7 +63,10 @@ app.use(
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
   })
 );
-app.use(express.json({ limit: "4mb" }));
+// Body limit large enough for a full book markdown ingested via the MCP tool
+// over HTTP. stdio (Claude Code/Desktop) has no such limit. Override with
+// MAX_BODY_MB (e.g. "32") for very large books.
+app.use(express.json({ limit: process.env.MAX_BODY_MB ? `${process.env.MAX_BODY_MB}mb` : "16mb" }));
 
 // Optional bearer auth (issue #1): protects the memory (/mcp + /api) when
 // AUTH_TOKEN is set. Static web UI stays open and prompts for the token.

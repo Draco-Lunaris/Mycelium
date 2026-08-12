@@ -188,7 +188,7 @@ pnpm --filter @mycelium/web dev
 
 The global bundle keeps the high-level map; a **shelf** is a second OKF bundle (its own `index.md`/`log.md`/graph) holding a topic's detail. Shelves live under `SHELVES_ROOT` (default a `shelves/` dir sibling to `BUNDLE_ROOT`); each subdirectory containing an `index.md` is a shelf.
 
-**Routing is explicit.** The MCP tools (`memory_query`/`memory_add`/`memory_update`/`memory_status`/`memory_maintain`) and the `/api/*` browse routes accept an optional `shelf` argument (default = global):
+**Routing is explicit.** The MCP tools (`memory_query`/`memory_add`/`memory_update`/`memory_status`/`memory_maintain`/`memory_ingest_book`) and the `/api/*` browse routes accept an optional `shelf` argument (default = global):
 
 ```
 memory_query({ question: "summarize chapter 3", shelf: "mycology" })
@@ -201,8 +201,6 @@ The session-start seed lists available shelves so the calling agent knows where 
 
 ```bash
 BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf create mycology        # empty shelf
-BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import <book-slug>/kb --name mycology   # whole bundle → new shelf
-BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf import-book <book-slug>/kb/<book-slug> --into mycology   # add a book segment
 BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core shelf list
 ```
 
@@ -215,12 +213,12 @@ that point into it. The agent fetches a chapter's full text **on demand** via a 
 tool — it never loads the whole book.
 
 - **Stacks** (`LIBRARY_ROOT`, default a `library/` dir sibling to `BUNDLE_ROOT`): one copy per book
-  at `library/<book-slug>/<book-slug>.md` (+ `figures/` + `meta.json`). A book is stored once and
-  can be cataloged in any number of shelves. NOT an OKF bundle — it never touches the shelf
-  structure.
-- **Catalog** (in a shelf): a `Book` hub + `Chapter` concepts with the sidecar's ≤200-char summary,
-  a `## Full passage` pointer, and `resource: book://<book-slug>#<chapter-anchor>`. The shelf stays
-  small (summaries only); `validate`/`graph`/`search` run over the catalog, not the corpus.
+  at `library/<book-slug>/<book-slug>.md`. A book is stored once and can be cataloged in any number
+  of shelves. NOT an OKF bundle — it never touches the shelf structure.
+- **Catalog** (in a shelf): a `Book` hub + `Chapter` concepts with a ≤200-char summary (generated
+  by the librarian from the chapter text), a `## Full passage` pointer, and
+  `resource: book://<book-slug>#<chapter-anchor>`. The shelf stays small (summaries only);
+  `validate`/`graph`/`search` run over the catalog, not the corpus.
 - **`read_passage`**: an internal agent tool that resolves `book://<slug>#<anchor>` to the stacks
   file and returns just that chapter's section. The agent searches the catalog, reads a chapter
   concept, then calls `read_passage` for the full text only when it needs the detail.
@@ -228,19 +226,28 @@ tool — it never loads the whole book.
 Large catalog shelves (>300 concepts) automatically get a compact, segment-level system prompt
 (search-first) so the prompt never lists every concept.
 
-#### Importing a book
+#### Ingesting a book
 
-```bash
-# after: pdf-to-markdown produces out/<book-slug>/  (<book-slug>.md + kb/ + figures/ + raw/)
-BUNDLE_ROOT=./sample-bundle pnpm --filter @mycelium/core book import out/<book-slug> \
-  --into <topic-shelf> --description "What this shelf covers (the agent routes by this)."
+Books are ingested through the `memory_ingest_book` MCP tool — the mycelium server is the
+**librarian**. The workflow is decoupled from pdf-to-markdown: pdf-to-markdown (a separate tool)
+produces a readable markdown file of the book and nothing more; you hand that markdown to mycelium,
+which stores it and catalogs it.
+
+```
+memory_ingest_book({
+  markdown: "<the book's GFM markdown — chapter headings must carry {#ch-N-<slug>} anchor IDs>",
+  title: "Book Title",        // optional; derived from the first H1 if omitted
+  shelf: "python",            // optional target topic shelf; if omitted the librarian routes it
+  description: "Python books" // used if the shelf is created
+})
 ```
 
-This stores the full book **once** in the shared stacks and writes the catalog into the named
-**topic shelf** (created if needed, with an `info.md` describing it). Re-importing the same book
-into another shelf reuses the one stacks copy — so all books live in a **single store**, while the
-**catalog references are divided into shelves** (one per topic/collection). A book can be cataloged
-in any number of shelves.
+The tool stores the full text **once** in the stacks (`library/<slug>/<slug>.md`), then an internal
+librarian agent derives the chapter outline (via `read_passage`), writes a ≤200-char summary per
+chapter, decides/creates the **topic shelf**, and writes the lightweight `Book`/`Chapter` catalog
+concepts into it. Books go on topic shelves, not the global shelf; a book that fits more than one
+topic is cataloged in each (one catalog segment per shelf, single stacks copy). Re-ingesting the
+same book into another shelf reuses the one stacks copy.
 
 Each shelf has an `info.md` (topic + description); the session seed lists shelves with their
 descriptions so the agent routes to the right one. Query with
@@ -249,8 +256,7 @@ fetches the relevant chapter via `read_passage`.
 
 > Don't dump every book into one shelf — divide the catalog across topic shelves so each stays
 > small enough (low thousands of concepts) for the in-memory scan. The full text in the stacks is
-> shared regardless. The older `shelf import` / `shelf import-book` path (full-text OKF sidecar
-> into a shelf) still exists for non-book bundles, but `book import` is the recommended path.
+> shared regardless.
 
 ## MCP registration (Claude Code / Desktop)
 

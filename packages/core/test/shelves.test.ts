@@ -14,10 +14,18 @@ import {
   recordHotWrite,
   recordHotQuery,
   createShelf,
-  importShelf,
-  importBookIntoShelf,
-  importBook,
+  ingestBook,
+  type MutationOutcome,
 } from "../src/index.js";
+import { runMutation, runQuery } from "../src/agent/index.js";
+
+// ingestBook delegates cataloging to the librarian agent (runMutation) and
+// routing to a read-only query (runQuery). Mock both so the test exercises the
+// deterministic store + shelf-resolution + orchestration, not the LLM itself.
+vi.mock("../src/agent/index.js", async (importActual) => {
+  const actual = await importActual();
+  return { ...actual, runMutation: vi.fn(), runQuery: vi.fn() };
+});
 
 function tmp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "mycelium-shelves-"));
@@ -146,27 +154,7 @@ describe("shelves keep their caches independent (keyed by bundle root)", () => {
   });
 });
 
-/** Build a pdf-to-markdown-style kb sidecar (root index + log + one book segment). */
-async function makeBookKb(kbRoot: string, slug: string): Promise<void> {
-  const seg = path.join(kbRoot, slug);
-  await fs.mkdir(seg, { recursive: true });
-  await fs.writeFile(
-    path.join(kbRoot, "index.md"),
-    `---\nokf_version: "0.1"\n---\n\n# Knowledge Base\n\n## Memory Segments\n\n* [${slug}](${slug}/) - 2 concepts (Reference, Project)\n`
-  );
-  await fs.writeFile(path.join(kbRoot, "log.md"), "# Directory Update Log\n");
-  await fs.writeFile(path.join(seg, "index.md"), `# ${slug}\n\n* [Book](book.md) - hub\n* [Chapter 1](ch-1.md) - intro\n`);
-  await fs.writeFile(
-    path.join(seg, "book.md"),
-    `---\ntype: Project\ntitle: "${slug} (Book)"\nresource: "file:///tmp/${slug}/${slug}.md"\ntimestamp: '2026-08-07T12:00:00.000Z'\n---\n# ${slug}\n\n## Chapters\n\n- [Introduction](/${slug}/ch-1.md) — intro.\n`
-  );
-  await fs.writeFile(
-    path.join(seg, "ch-1.md"),
-    `---\ntype: Reference\ntitle: "${slug} — Chapter 1"\nresource: "file:///tmp/${slug}/${slug}.md#ch-1"\ntimestamp: '2026-08-07T12:00:00.000Z'\n---\n# Introduction\n\nThe opening.\n\n## Related Concepts\n\n- [${slug} (Book)](/${slug}/book.md)\n`
-  );
-}
-
-describe("shelf import pipeline", () => {
+describe("createShelf", () => {
   let globalRoot: string;
   let shelvesRoot: string;
   let reg: ShelfRegistry;
@@ -184,7 +172,7 @@ describe("shelf import pipeline", () => {
     await fs.rm(shelvesRoot, { recursive: true, force: true });
   });
 
-  it("createShelf scaffolds an empty conformant shelf and registers it", async () => {
+  it("scaffolds an empty conformant shelf and registers it", async () => {
     const kb = await createShelf(reg, "mycology");
     expect(reg.get("mycology")).toBe(kb);
     const report = await kb.validate();
@@ -192,72 +180,11 @@ describe("shelf import pipeline", () => {
     expect(report.conceptCount).toBe(0);
   });
 
-  it("createShelf rejects a name that already exists", async () => {
+  it("rejects a name that already exists", async () => {
     await createShelf(reg, "dup");
     await expect(createShelf(reg, "dup")).rejects.toThrow(/already exists/);
   });
-
-  it("importShelf copies a kb bundle into a new shelf and validates (Reference type ok)", async () => {
-    const srcRoot = await tmp();
-    const kbDir = path.join(srcRoot, "kb");
-    await makeBookKb(kbDir, "the-art-of-x");
-    const { name, report } = await importShelf(reg, kbDir, "art");
-    expect(name).toBe("art");
-    expect(report.conformant).toBe(true);
-    expect(report.conceptCount).toBe(2);
-    expect(reg.get("art").bundle.root).toBe(path.join(shelvesRoot, "art"));
-    await fs.rm(srcRoot, { recursive: true, force: true });
-  });
-
-  it("importShelf defaults the name to the book slug for a <slug>/kb dir", async () => {
-    const bookRoot = await tmp();
-    const kbDir = path.join(bookRoot, "the-art-of-x", "kb");
-    await makeBookKb(kbDir, "the-art-of-x");
-    const { name } = await importShelf(reg, kbDir);
-    expect(name).toBe("the-art-of-x");
-    await fs.rm(bookRoot, { recursive: true, force: true });
-  });
-
-  it("importShelf rejects a source without index.md", async () => {
-    const bad = await tmp(); // empty dir, no index.md
-    await expect(importShelf(reg, bad, "bad")).rejects.toThrow(/not an OKF bundle/);
-    await fs.rm(bad, { recursive: true, force: true });
-  });
-
-  it("importBookIntoShelf copies a segment into an existing shelf and updates its index/log", async () => {
-    const bookRoot = await tmp();
-    const kbDir = path.join(bookRoot, "the-art-of-x", "kb");
-    await makeBookKb(kbDir, "the-art-of-x");
-    await createShelf(reg, "library");
-    await importBookIntoShelf(reg, "library", path.join(kbDir, "the-art-of-x"));
-
-    const shelfKb = reg.get("library");
-    const tree = await shelfKb.listTree();
-    expect(countConceptsInTree(tree)).toBe(2);
-    const rootIndex = await fs.readFile(path.join(shelfKb.bundle.root, "index.md"), "utf8");
-    expect(rootIndex).toContain("the-art-of-x");
-    const log = await shelfKb.readLog();
-    expect(log.some((e) => e.summary.includes("the-art-of-x"))).toBe(true);
-    await fs.rm(bookRoot, { recursive: true, force: true });
-  });
-
-  it("importBookIntoShelf rejects a missing shelf", async () => {
-    const bookRoot = await tmp();
-    const kbDir = path.join(bookRoot, "b", "kb");
-    await makeBookKb(kbDir, "b");
-    await expect(importBookIntoShelf(reg, "nope", path.join(kbDir, "b"))).rejects.toThrow(ShelfNotFoundError);
-    await fs.rm(bookRoot, { recursive: true, force: true });
-  });
 });
-
-function countConceptsInTree(node: { children?: { kind: string; children?: unknown[] }[] }): number {
-  let n = 0;
-  for (const child of node.children ?? []) {
-    if (child.kind === "concept") n++;
-    else if (child.kind === "directory") n += countConceptsInTree(child as { children?: { kind: string }[] });
-  }
-  return n;
-}
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -268,46 +195,55 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-/** Build a pdf-to-markdown-style output dir: <slug>/<slug>.md + kb/<slug>/{book.md, ch-*.md, meta.json}. */
-async function makePdfOutput(workDir: string, slug: string): Promise<string> {
-  const out = path.join(workDir, slug);
-  const seg = path.join(out, "kb", slug);
-  await fs.mkdir(seg, { recursive: true });
-  await fs.writeFile(
-    path.join(out, `${slug}.md`),
-    `# ${slug} Book\n\n## Chapter One {#ch-1-intro}\n\nThe first chapter full text. A long passage about intro topics.\n\n## Chapter Two {#ch-2-next}\n\nThe second chapter full text about next topics.\n`
+/** Sample book markdown with two GFM-anchored chapters (the pdf-to-markdown output shape). */
+function sampleMarkdown(title = "The Art of X"): string {
+  return (
+    `# ${title}\n\n` +
+    `## Chapter One {#ch-1-intro}\n\nThe first chapter full text. A long passage about intro topics.\n\n` +
+    `## Chapter Two {#ch-2-next}\n\nThe second chapter full text about next topics.\n`
   );
-  await fs.writeFile(
-    path.join(seg, "meta.json"),
-    JSON.stringify({
-      readable_book_path: path.join(out, `${slug}.md`),
-      chapter_count: 2,
-      source_pdf: `/tmp/${slug}.pdf`,
-      page_count: 100,
-      converted_at: "2026-08-08T00:00:00Z",
-    })
-  );
-  await fs.writeFile(
-    path.join(seg, "ch-1-intro.md"),
-    `---\ntype: Reference\ntitle: "Chapter 1: Intro"\ndescription: "The first chapter full text."\ntags:\n  - book:${slug}\n  - chapter\nresource: "file://${path.join(out, slug + ".md")}#ch-1-intro"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# Chapter 1: Intro\n\nThe first chapter full text. A long passage about intro topics.\n\n## Related Concepts\n\n- [${slug} (Book)](/${slug}/book.md) — the book this chapter belongs to\n- [Chapter 2](/${slug}/ch-2-next.md) — next chapter\n`
-  );
-  await fs.writeFile(
-    path.join(seg, "ch-2-next.md"),
-    `---\ntype: Reference\ntitle: "Chapter 2: Next"\ndescription: "The second chapter full text."\ntags:\n  - book:${slug}\n  - chapter\nresource: "file://${path.join(out, slug + ".md")}#ch-2-next"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# Chapter 2: Next\n\nThe second chapter full text about next topics.\n\n## Related Concepts\n\n- [${slug} (Book)](/${slug}/book.md) — the book this chapter belongs to\n- [Chapter 1](/${slug}/ch-1-intro.md) — previous chapter\n`
-  );
-  await fs.writeFile(
-    path.join(seg, "book.md"),
-    `---\ntype: Project\ntitle: "${slug} (Book)"\ndescription: "${slug}, by Jane Doe — 100 pages."\ntags:\n  - book:${slug}\n  - book\nresource: "file://${path.join(out, slug + ".md")}"\ntimestamp: '2026-08-08T00:00:00.000Z'\n---\n# ${slug} (Book)\n\n## About\n\n**Title:** ${slug}\n**Author:** Jane Doe\n\n## Chapters\n\n- [Chapter 1: Intro](/${slug}/ch-1-intro.md) — The first chapter full text.\n- [Chapter 2: Next](/${slug}/ch-2-next.md) — The second chapter full text.\n`
-  );
-  await fs.writeFile(
-    path.join(out, "kb", "index.md"),
-    `---\nokf_version: "0.1"\n---\n\n# Knowledge Base\n\n## Memory Segments\n\n* [${slug}](${slug}/) - 3 concepts\n`
-  );
-  await fs.writeFile(path.join(out, "kb", "log.md"), `# Directory Update Log\n\n## 2026-08-08\n\n* **Creation**: ${slug}\n`);
-  return out;
 }
 
-describe("importBook (catalog + stacks)", () => {
+/**
+ * A stand-in for the librarian: writes a lightweight Book hub + Chapter catalog
+ * concepts (with book:// resources + read_passage pointers) into the shelf KB,
+ * the way the real agent would. Returns a successful MutationOutcome.
+ */
+function librarianCatalog(
+  slug: string
+): (kb: KnowledgeBase, instruction: string) => Promise<MutationOutcome> {
+  return async (kb) => {
+    await kb.writeConcept(
+      `/${slug}/book.md`,
+      { type: "Book", title: slug, resource: `book://${slug}` },
+      `# ${slug}\n\n## Chapters\n\n- [Chapter One](/${slug}/ch-1-intro.md)\n- [Chapter Two](/${slug}/ch-2-next.md)\n`,
+      "ingest"
+    );
+    await kb.writeConcept(
+      `/${slug}/ch-1-intro.md`,
+      { type: "Chapter", title: "Chapter One", description: "intro summary", resource: `book://${slug}#ch-1-intro` },
+      "intro summary\n\n## Full passage\n\nFetch with `read_passage(book://" + slug + "#ch-1-intro)`.\n",
+      "ingest"
+    );
+    await kb.writeConcept(
+      `/${slug}/ch-2-next.md`,
+      { type: "Chapter", title: "Chapter Two", description: "next summary", resource: `book://${slug}#ch-2-next` },
+      "next summary\n\n## Full passage\n\nFetch with `read_passage(book://" + slug + "#ch-2-next)`.\n",
+      "ingest"
+    );
+    return {
+      ok: true,
+      result: {
+        summary: `cataloged ${slug} (2 chapters)`,
+        filesChanged: [`/${slug}/book.md`, `/${slug}/ch-1-intro.md`, `/${slug}/ch-2-next.md`],
+        steps: 3,
+        traceId: "test",
+      },
+    };
+  };
+}
+
+describe("ingestBook (store + librarian catalog)", () => {
   let globalRoot: string;
   let shelvesRoot: string;
   let libraryRoot: string;
@@ -322,50 +258,104 @@ describe("importBook (catalog + stacks)", () => {
     await makeBundle(globalRoot);
     reg = new ShelfRegistry(globalRoot, { shelvesRoot });
     await reg.discover();
+    vi.mocked(runMutation).mockReset();
+    vi.mocked(runQuery).mockReset();
   });
 
   afterEach(async () => {
     await fs.rm(work, { recursive: true, force: true });
   });
 
-  it("stores the full book in the stacks and writes a lightweight catalog in the shelf", async () => {
-    const out = await makePdfOutput(work, "the-art-of-x");
-    const result = await importBook(reg, libraryRoot, out, "mylib");
+  it("stores the markdown in the stacks once and catalogs into the supplied shelf", async () => {
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("the-art-of-x"));
+    const result = await ingestBook(reg, libraryRoot, sampleMarkdown("The Art of X"), {
+      slug: "the-art-of-x",
+      shelf: "mylib",
+      description: "art books",
+    });
     expect(result.slug).toBe("the-art-of-x");
-    expect(result.shelfName).toBe("mylib");
-    expect(result.chapterCount).toBe(2);
-    expect(result.report.conformant).toBe(true);
+    expect(result.shelves).toHaveLength(1);
+    expect(result.shelves[0].shelf).toBe("mylib");
+    expect(result.shelves[0].created).toBe(true);
 
-    // stacks: full book + meta.json stored once
-    expect(await pathExists(path.join(libraryRoot, "the-art-of-x", "the-art-of-x.md"))).toBe(true);
-    expect(await pathExists(path.join(libraryRoot, "the-art-of-x", "meta.json"))).toBe(true);
+    // stacks: single copy of the book markdown
+    const stacksFile = path.join(libraryRoot, "the-art-of-x", "the-art-of-x.md");
+    expect(await pathExists(stacksFile)).toBe(true);
+    expect(await fs.readFile(stacksFile, "utf-8")).toContain("Chapter One {#ch-1-intro}");
 
-    // shelf catalog segment
+    // shelf catalog segment written by the librarian
     const segDir = path.join(reg.get("mylib").bundle.root, "the-art-of-x");
-    expect(await pathExists(path.join(segDir, "book.md"))).toBe(true);
-    expect(await pathExists(path.join(segDir, "ch-1-intro.md"))).toBe(true);
-
-    // catalog chapter is small, has book:// resource + read_passage pointer, NOT the full text
+    const book = await fs.readFile(path.join(segDir, "book.md"), "utf-8");
+    expect(book).toContain("type: Book");
+    expect(book).toContain("book://the-art-of-x");
     const ch1 = await fs.readFile(path.join(segDir, "ch-1-intro.md"), "utf-8");
     expect(ch1).toContain("type: Chapter");
     expect(ch1).toContain("book://the-art-of-x#ch-1-intro");
     expect(ch1).toContain("read_passage(book://the-art-of-x#ch-1-intro)");
+    // the full text is NOT in the catalog concept
     expect(ch1).not.toContain("A long passage about intro topics");
-
-    // book hub points at the stacks
-    const book = await fs.readFile(path.join(segDir, "book.md"), "utf-8");
-    expect(book).toContain("type: Book");
-    expect(book).toContain("book://the-art-of-x");
   });
 
   it("reuses the stacks copy when the same book is cataloged into a second shelf", async () => {
-    const out = await makePdfOutput(work, "shared-book");
-    await importBook(reg, libraryRoot, out, "shelf-a");
-    const { shelfName } = await importBook(reg, libraryRoot, out, "shelf-b");
-    expect(shelfName).toBe("shelf-b");
-    // both shelves have the catalog segment; stacks has one copy
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("shared-book"));
+    const md = sampleMarkdown("Shared Book");
+    await ingestBook(reg, libraryRoot, md, { slug: "shared-book", shelf: "shelf-a" });
+    const stacksFile = path.join(libraryRoot, "shared-book", "shared-book.md");
+    const firstMtime = (await fs.stat(stacksFile)).mtimeMs;
+    // A second ingest with DIFFERENT markdown must not overwrite the stacks copy.
+    await ingestBook(reg, libraryRoot, md + "\n\n# DIFFERENT\n", { slug: "shared-book", shelf: "shelf-b" });
+    expect((await fs.stat(stacksFile)).mtimeMs).toBe(firstMtime);
+
+    // both shelves have a catalog segment; stacks has the one (unchanged) copy
     expect(await pathExists(path.join(reg.get("shelf-a").bundle.root, "shared-book", "book.md"))).toBe(true);
     expect(await pathExists(path.join(reg.get("shelf-b").bundle.root, "shared-book", "book.md"))).toBe(true);
-    expect(await pathExists(path.join(libraryRoot, "shared-book", "shared-book.md"))).toBe(true);
+    expect(await fs.readFile(stacksFile, "utf-8")).not.toContain("DIFFERENT");
+  });
+
+  it("routes via the librarian when no shelf is supplied", async () => {
+    vi.mocked(runQuery).mockResolvedValue({ answer: "SHELVES: python", steps: 1, traceId: "test" });
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("py-book"));
+    const result = await ingestBook(reg, libraryRoot, sampleMarkdown("Py Book"), { slug: "py-book" });
+    expect(runQuery).toHaveBeenCalledWith(reg.global, expect.any(String));
+    expect(result.shelves).toHaveLength(1);
+    expect(result.shelves[0].shelf).toBe("python");
+    expect(result.shelves[0].created).toBe(true);
+    expect(runMutation).toHaveBeenCalledWith(reg.get("python"), expect.any(String));
+  });
+
+  it("routes to multiple topic shelves when the librarian returns several", async () => {
+    vi.mocked(runQuery).mockResolvedValue({ answer: "SHELVES: python, security", steps: 1, traceId: "test" });
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("hacking-py"));
+    const result = await ingestBook(reg, libraryRoot, sampleMarkdown("Hacking with Python"), {
+      slug: "hacking-py",
+    });
+    expect(result.shelves.map((s) => s.shelf).sort()).toEqual(["python", "security"]);
+    expect(runMutation).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips a shelf where the book is already cataloged", async () => {
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("dup-book"));
+    await createShelf(reg, "mylib");
+    // pre-create the segment dir so the ingest skips this shelf
+    await fs.mkdir(path.join(reg.get("mylib").bundle.root, "dup-book"), { recursive: true });
+    const result = await ingestBook(reg, libraryRoot, sampleMarkdown("Dup Book"), {
+      slug: "dup-book",
+      shelf: "mylib",
+    });
+    expect(result.shelves[0].skipped).toMatch(/already cataloged/);
+    expect(runMutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects the global shelf as a target", async () => {
+    await expect(
+      ingestBook(reg, libraryRoot, sampleMarkdown("X"), { slug: "x", shelf: "global" })
+    ).rejects.toThrow(/topic shelves, not the global shelf/);
+  });
+
+  it("derives the slug from the first H1 when none is given", async () => {
+    vi.mocked(runMutation).mockImplementation(librarianCatalog("my-book"));
+    const result = await ingestBook(reg, libraryRoot, sampleMarkdown("My Book"), { shelf: "mylib" });
+    expect(result.slug).toBe("my-book");
+    expect(result.title).toBe("My Book");
   });
 });
