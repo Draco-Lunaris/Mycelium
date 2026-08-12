@@ -3,10 +3,11 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
-import { ShelfRegistry, resolveFallbackConfig, resolveModelConfig, resolveShelvesRoot } from "@mycelium/core";
+import { ShelfRegistry, resolveFallbackConfig, resolveLibraryRoot, resolveModelConfig, resolveShelvesRoot } from "@mycelium/core";
 import { mcpRouter } from "./mcp/http.js";
 import { browseRouter } from "./api/browse.js";
 import { chatRouter } from "./api/chat.js";
+import { ingestRouter } from "./api/ingest.js";
 import { activityRouter } from "./api/activity.js";
 import { bearerAuth } from "./auth.js";
 import { startDreamer } from "./dreamer.js";
@@ -23,6 +24,16 @@ const registry = new ShelfRegistry(bundleRoot, {
 });
 const shelves = await registry.discover();
 if (shelves.length > 0) console.log(`[mycelium] shelves: ${shelves.join(", ")}`);
+
+// Library stacks root for book ingest (LIBRARY_ROOT env, or a `library/` sibling
+// of BUNDLE_ROOT). Tolerate an unset BUNDLE_ROOT the way tryLibraryRoot did.
+const libraryRoot = (() => {
+  try {
+    return resolveLibraryRoot(process.env);
+  } catch {
+    return undefined;
+  }
+})();
 
 startDreamer(registry);
 
@@ -63,9 +74,9 @@ app.use(
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
   })
 );
-// Body limit large enough for a full book markdown ingested via the MCP tool
-// over HTTP. stdio (Claude Code/Desktop) has no such limit. Override with
-// MAX_BODY_MB (e.g. "32") for very large books.
+// JSON body limit for endpoints like /api/chat. Book ingest uses multipart
+// (POST /api/ingest-book) with its own INGEST_LIMIT_MB. Override the JSON
+// limit with MAX_BODY_MB (e.g. "32") for very large chat payloads.
 app.use(express.json({ limit: process.env.MAX_BODY_MB ? `${process.env.MAX_BODY_MB}mb` : "16mb" }));
 
 // Optional bearer auth (issue #1): protects the memory (/mcp + /api) when
@@ -81,6 +92,7 @@ if (authToken) {
 app.use("/mcp", mcpRouter(registry));
 app.use("/api", browseRouter(registry));
 app.use("/api", chatRouter(registry));
+app.use("/api", ingestRouter(registry, libraryRoot));
 app.use("/api", activityRouter());
 
 // Serve the built web UI in production (single container), with SPA fallback.
