@@ -159,20 +159,89 @@ function routingInstruction(
 
 function catalogInstruction(title: string, slug: string): string {
   return (
-    `Catalog the book "${title}" (slug "${slug}") into this shelf as a card catalog. ` +
-    `The full text is already in the library stacks; do NOT copy it into concept bodies.\n\n` +
-    `STEPS:\n` +
-    `1. Call read_passage(book://${slug}) — it returns the book's chapter-anchor list (ch-N-<slug> — <title>).\n` +
-    `2. For each chapter anchor, call read_passage(book://${slug}#<anchor>) and write a ≤200-char summary of that chapter.\n` +
-    `3. write_concept /${slug}/book.md: frontmatter type "Book", title "${title}", resource "book://${slug}"; ` +
-    `body with an # About section (one-paragraph overview) and a # Chapters section listing each chapter ` +
-    `(link to its concept path, one-line summary).\n` +
-    `4. For each chapter, write_concept /${slug}/<anchor>.md: frontmatter type "Chapter", title the chapter title, ` +
-    `description the ≤200-char summary, resource "book://${slug}#<anchor>"; body with the summary plus a ` +
-    `## Full passage section saying: Fetch the full chapter text with \`read_passage(book://${slug}#<anchor>)\`.\n` +
-    `5. Link each Chapter concept back to the Book hub and to its prev/next siblings under ## Related Concepts ` +
-    `(use bundle-relative links like ./${slug}/book.md and ./${slug}/<next-anchor>.md).\n` +
-    `6. Stop when every chapter is cataloged. Summarize what you created.`
+    `Catalog the book "${title}" (slug "${slug}") into this shelf as a dense, cross-linked card catalog. ` +
+    `The full text is already in the library stacks; do NOT paste chapter prose into concept bodies — ` +
+    `summarize it and link to it via \`resource: book://${slug}#<anchor>\`.\n\n` +
+
+    `STEP BUDGET (HARD):\n` +
+    `You have at most 12 tool calls for this whole catalog. Plan accordingly:\n` +
+    `  1× read_passage(book://${slug})            — discover chapters and sec-* sections\n` +
+    `  1× write_concept  /${slug}/book.md          — the Book index\n` +
+    `  N× write_concept  /${slug}/<anchor>.md      — one per chapter\n` +
+    `  1× read_concept   /${slug}/book.md          — re-read for cross-book wiring\n` +
+    `  1× patch_concept  /<other-book>/book.md     — add cross-book link(s) [best-effort]\n` +
+    `  1× lint_knowledge                           — final check\n` +
+    `If N + 4 > 12 (e.g. 9 chapters), DROP step 5 (cross-book patch) and lint — never drop chapter writes.\n\n` +
+
+    `BOOK INDEX CONCEPT — write_concept path "/${slug}/book.md":\n` +
+    `  frontmatter:\n` +
+    `    type: "Book"\n` +
+    `    title: "${title}"\n` +
+    `    resource: "book://${slug}"\n` +
+    `    tags: [book, <2–6 topic tags from chapter titles>]\n` +
+    `    source: "<book title and/or author, if known from the markdown>"\n` +
+    `    chapters: <integer N>\n` +
+    `    anchors: [ch-1-${slug}, ch-2-${slug}, ...]\n` +
+    `  body (target 2–5k chars):\n` +
+    `    # About\n` +
+    `    Two short paragraphs: what the book is, who it is for, how it is organized.\n\n` +
+    `    # Chapters\n` +
+    `    One bullet per chapter, absolute bundle-relative link:\n` +
+    `      - [Ch 1: <title>](/${slug}/ch-1-${slug}.md) — <one-line summary>\n` +
+    `    (NOT a table — bullets only)\n\n` +
+    `    # Topics\n` +
+    `    3–8 keyword phrases, comma-separated. Used for cross-book matching in step 5.\n\n` +
+    `    # Related Concepts\n` +
+    `    [/](/<this-shelf>.md) and absolute links to other Book hubs on related topics.\n\n` +
+
+    `CHAPTER CONCEPT — for each chapter, write_concept path "/${slug}/<anchor>.md":\n` +
+    `  frontmatter:\n` +
+    `    type: "Chapter"\n` +
+    `    title: "<chapter title>"\n` +
+    `    description: 120–180 chars summarizing what it TEACHES (not what it is "about")\n` +
+    `    resource: "book://${slug}#<anchor>"\n` +
+    `    tags: [chapter, <2–4 subtopic tags>]\n` +
+    `    book: "/${slug}/book.md"\n` +
+    `    chapter_index: <1..N>\n` +
+    `  body (target 3–8k chars, floor 2k — DENSE concept, not a stub):\n` +
+    `    # Summary\n` +
+    `    2–4 paragraphs: central thesis, 3–6 key concepts/commands/APIs, how they connect to other chapters.\n\n` +
+    `    # Key Concepts\n` +
+    `    5–15 bullets of every named concept/command/API the chapter covers.\n\n` +
+    `    # Examples and Patterns\n` +
+    `    2–5 fenced code/config snippets with one-line captions. Worked-example bullets if conceptual.\n\n` +
+    `    # Pitfalls and Edge Cases\n` +
+    `    1–4 bullets on gotchas, deprecations, caveats.\n\n` +
+    `    # Full passage\n` +
+    `    Fetch the full chapter text with \`read_passage(book://${slug}#<anchor>)\`.\n\n` +
+    `    # Related Concepts\n` +
+    `    Absolute bundle-relative links only:\n` +
+    `      - [Book hub: ${title}](/${slug}/book.md)\n` +
+    `      - [Prev chapter](/${slug}/<prev-anchor>.md)  (if not first)\n` +
+    `      - [Next chapter](/${slug}/<next-anchor>.md)  (if not last)\n` +
+    `      - 0–3 links to chapters in OTHER books on related topics.\n\n` +
+
+    `STEP 5 — CROSS-BOOK WIRING (skip if over budget):\n` +
+    `  (a) read_concept /${slug}/book.md — confirm your # Topics list.\n` +
+    `  (b) For each OTHER Book hub whose # Topics share ≥2 keywords with this book, ` +
+    `patch_concept that other book's "Related Concepts" section: - [${title}](/${slug}/book.md).\n` +
+    `  (c) On each Chapter concept, link to specific chapters in sibling books covering the same ` +
+    `named concept (≥2 shared items in # Key Concepts).\n\n` +
+
+    `LINK FORMAT (critical — scanGraph only counts absolute bundle-relative links):\n` +
+    `  CORRECT:  [Book hub](/${slug}/book.md)\n` +
+    `  WRONG (silently ignored):  [Book hub](./book.md)\n` +
+    `  Cross-book example:  [Linux networking](/linux/<some-slug>/ch-3-<some-slug>.md)\n\n` +
+
+    `BODY LENGTH:\n` +
+    `  Book index: 2–5k chars (~3k target).\n` +
+    `  Chapter concept: 3–8k chars (~5k target), NEVER below 2k.\n` +
+    `  If read_passage for a chapter returns > 128k chars (truncated), compose from chapter title + ` +
+    `sub-section titles + your knowledge — do NOT try to re-read the full chapter.\n` +
+    `  If read_passage(book://${slug}) returns no anchors, write a Book-only catalog at /${slug}/book.md ` +
+    `documenting the missing structure and stop. Do NOT invent chapter anchors.\n\n` +
+    `Begin with read_passage(book://${slug}). When every chapter is cataloged, summarize what you created ` +
+    `(concept count, chapter count, cross-book links added).`
   );
 }
 
