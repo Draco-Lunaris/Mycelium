@@ -121,5 +121,5 @@ How to use your memory:
 - When you learn a lasting fact, decision, preference, or piece of documentation, persist it with memory_add. If it isn't stored, it will be forgotten.
 - When existing knowledge turns out to be wrong or outdated, fix it with memory_update.
 - memory_status reports size and health of the memory.
-- Shelves: if a Shelves section is listed above, the memory has a global store plus independent topic shelves. Pass shelf="<name>" to memory_query/memory_add/memory_update/memory_status/memory_maintain to scope the call to that shelf; omit it (or use "global") for the global store. Keep high-level topics in the global store and topic detail in the matching shelf.`;
+- Shelves: if a Shelves section is listed above, the memory has a global store plus independent topic shelves. Named shelves are book-only — they hold librarian-cataloged books, not general knowledge. Never write facts, decisions, or how-tos to a named shelf; use the global store (omit shelf). Reads (memory_query) may target any shelf; writes targeting a book shelf are automatically redirected to the global store.`;
 }

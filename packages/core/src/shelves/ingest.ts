@@ -298,7 +298,11 @@ export async function ingestBook(
   // 3. Catalog into each shelf — one mutation per shelf, one library copy.
   const shelfResults: IngestShelfResult[] = [];
   for (const name of shelfNames) {
-    const { kb, created } = await ensureShelf(registry, name, { topic: opts.topic, description: opts.description });
+    const { kb, created } = await ensureShelf(registry, name, {
+      topic: opts.topic,
+      description: opts.description,
+      kind: "book",
+    });
     const segDir = path.join(kb.bundle.root, slug);
     if (await pathExists(segDir)) {
       shelfResults.push({ shelf: name, created, skipped: "already cataloged in this shelf", conceptCount: 0, conformant: true });

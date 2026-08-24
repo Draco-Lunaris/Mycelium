@@ -12,6 +12,8 @@ export interface ShelfInfo {
   description?: string;
   /** Shelf topic from its info.md (if any). */
   topic?: string;
+  /** Shelf kind from its info.md (if any); `"book"` marks a book-only shelf. */
+  kind?: string;
 }
 
 /** Thrown when a caller asks for a shelf that isn't registered/on disk. */
@@ -68,6 +70,35 @@ export class ShelfRegistry {
   /** All shelves' KBs, global first. */
   all(): KnowledgeBase[] {
     return [this.global, ...this.shelves.values()];
+  }
+
+  /**
+   * Whether `name` is a book-only shelf — i.e. client writes (memory_add /
+   * memory_update) must be redirected to the global store. A shelf is
+   * book-only when its info.md declares `kind: book`, or — as a safety net for
+   * shelves created before that marker existed — when it already holds a
+   * `Book`-typed catalog concept. `undefined` / `"global"` → false (the global
+   * store is always writable). Unknown shelves throw {@link ShelfNotFoundError}
+   * (resolve via {@link get} first, or catch).
+   */
+  async isBookShelf(name?: string): Promise<boolean> {
+    if (!name || name === "global") return false;
+    const kb = this.get(name); // throws ShelfNotFoundError if unknown
+    try {
+      const raw = await fs.readFile(path.join(kb.bundle.root, "info.md"), "utf-8");
+      const fm = parseDoc(raw).frontmatter as Record<string, unknown>;
+      if (typeof fm.kind === "string" && fm.kind) return fm.kind === "book";
+    } catch {
+      // no info.md / unreadable → fall through to the heuristic.
+    }
+    // Safety net: an unmarked shelf that already holds a Book catalog concept
+    // is a book shelf; treat it as such until it is backfilled with kind: book.
+    try {
+      const types = await kb.listTypes();
+      return types.includes("Book");
+    } catch {
+      return false;
+    }
   }
 
   /** Register (or replace) a shelf KB by name. Used by the import pipeline. */
@@ -134,12 +165,13 @@ async function shelfInfo(name: string, kb: KnowledgeBase): Promise<ShelfInfo> {
   } catch {
     // empty/non-conforming shelf → 0
   }
-  const info: Pick<ShelfInfo, "description" | "topic"> = {};
+  const info: Pick<ShelfInfo, "description" | "topic" | "kind"> = {};
   try {
     const raw = await fs.readFile(path.join(kb.bundle.root, "info.md"), "utf-8");
     const fm = parseDoc(raw).frontmatter as Record<string, unknown>;
     if (typeof fm.description === "string" && fm.description) info.description = fm.description;
     if (typeof fm.topic === "string" && fm.topic) info.topic = fm.topic;
+    if (typeof fm.kind === "string" && fm.kind) info.kind = fm.kind;
   } catch {
     // no info.md (pre-info.md shelf) → no description; seed falls back to count
   }

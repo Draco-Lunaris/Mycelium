@@ -184,6 +184,64 @@ describe("createShelf", () => {
     await createShelf(reg, "dup");
     await expect(createShelf(reg, "dup")).rejects.toThrow(/already exists/);
   });
+
+  it("writes kind into info.md when supplied", async () => {
+    await createShelf(reg, "lib", { kind: "book" });
+    const info = await fs.readFile(path.join(reg.get("lib").bundle.root, "info.md"), "utf-8");
+    expect(info).toMatch(/kind:\s*"book"/);
+  });
+
+  it("omits kind from info.md when not supplied", async () => {
+    await createShelf(reg, "scratch");
+    const info = await fs.readFile(path.join(reg.get("scratch").bundle.root, "info.md"), "utf-8");
+    expect(info).not.toMatch(/kind:/);
+  });
+});
+
+describe("ShelfRegistry.isBookShelf", () => {
+  let globalRoot: string;
+  let shelvesRoot: string;
+  let reg: ShelfRegistry;
+
+  beforeEach(async () => {
+    globalRoot = await tmp();
+    shelvesRoot = await tmp();
+    await makeBundle(globalRoot);
+    reg = new ShelfRegistry(globalRoot, { shelvesRoot });
+    await reg.discover();
+  });
+
+  afterEach(async () => {
+    await fs.rm(globalRoot, { recursive: true, force: true });
+    await fs.rm(shelvesRoot, { recursive: true, force: true });
+  });
+
+  it("global / undefined is never a book shelf", async () => {
+    expect(await reg.isBookShelf()).toBe(false);
+    expect(await reg.isBookShelf("global")).toBe(false);
+  });
+
+  it("returns true for a shelf marked kind: book", async () => {
+    await createShelf(reg, "lib", { kind: "book" });
+    expect(await reg.isBookShelf("lib")).toBe(true);
+  });
+
+  it("falls back to Book-typed concept detection for an unmarked shelf", async () => {
+    // No kind marker, but a Book catalog concept → still book-only (safety net).
+    await createShelf(reg, "unmarked");
+    await reg.get("unmarked").writeConcept("/someslug/book.md", { type: "Book", title: "Some" }, "body", "add");
+    expect(await reg.isBookShelf("unmarked")).toBe(true);
+  });
+
+  it("returns false for an unmarked shelf with no Book concept (general/scratch)", async () => {
+    await createShelf(reg, "scratch");
+    await reg.get("scratch").writeConcept("/facts/x.md", { type: "Fact", title: "X" }, "body", "add");
+    expect(await reg.isBookShelf("scratch")).toBe(false);
+  });
+
+  it("throws ShelfNotFoundError for an unknown shelf", async () => {
+    await expect(reg.isBookShelf("nope")).rejects.toThrow(ShelfNotFoundError);
+  });
 });
 
 async function pathExists(p: string): Promise<boolean> {
