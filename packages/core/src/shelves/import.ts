@@ -17,21 +17,30 @@ const ROOT_LOG = `# Directory Update Log\n`;
 export interface ShelfCreateOptions {
   topic?: string;
   description?: string;
+  /**
+   * Shelf kind. `"book"` marks a book-only shelf (cataloged by the librarian
+   * during ingest); the write guard redirects client writes away from it to
+   * the global store. Omit for a general/scratch shelf.
+   */
+  kind?: string;
 }
 
 /**
  * Render a shelf's `info.md` — a reserved metadata file (not an OKF concept)
- * holding the shelf's topic + description. The session seed reads it so the
- * agent can route to the shelf by what it covers, not just its name.
+ * holding the shelf's topic + description (+ optional kind). The session seed
+ * reads it so the agent can route to the shelf by what it covers, not just its
+ * name; the registry reads `kind` to decide whether the shelf is book-only.
  */
 function shelfInfoContent(name: string, opts: ShelfCreateOptions = {}): string {
   const topic = opts.topic || name;
   const description = opts.description || "";
+  const kindLine = opts.kind ? `kind: ${JSON.stringify(opts.kind)}\n` : "";
   return (
     "---\n" +
     `name: ${JSON.stringify(name)}\n` +
     `topic: ${JSON.stringify(topic)}\n` +
     `description: ${JSON.stringify(description)}\n` +
+    kindLine +
     "---\n\n" +
     `# ${name}\n\n` +
     (description ||

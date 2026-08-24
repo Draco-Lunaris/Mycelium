@@ -34,6 +34,29 @@ function errorReply(message: string) {
 }
 
 /**
+ * Resolve the KB a *client write* (memory_add / memory_update) should target.
+ * Named book shelves are write-protected for client tools: a write aimed at
+ * one is redirected to the global store, with `redirectedFrom` set so the
+ * caller can note the reroute in its response. The librarian / ingestBook path
+ * is unaffected — it writes Book/Chapter catalogs directly via runMutation
+ * against the shelf KB, never through these tools.
+ */
+export async function resolveWritableKb(
+  registry: ShelfRegistry,
+  shelf?: string
+): Promise<{ kb: KnowledgeBase; redirectedFrom?: string } | { error: string }> {
+  try {
+    const target = registry.get(shelf);
+    if (shelf && shelf !== "global" && (await registry.isBookShelf(shelf))) {
+      return { kb: registry.global, redirectedFrom: shelf };
+    }
+    return { kb: target };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Build the OKF MCP server. Each knowledge tool internally drives the LLM
  * agent (OKF spec in its system prompt) against a single bundle. A `shelf`
  * argument on any tool scopes the call to an independent topic store; the
@@ -102,14 +125,17 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
     }
   };
 
-  const mutationOutcomeResponse = (outcome: MutationOutcome) => {
+  const mutationOutcomeResponse = (outcome: MutationOutcome, redirectedFrom?: string) => {
+    const redirectNote = redirectedFrom
+      ? `\n\nℹ Redirected from book shelf "${redirectedFrom}" (book-only) to the global store.`
+      : "";
     if (outcome.ok) {
       const { summary, filesChanged } = outcome.result;
       return {
         content: [
           {
             type: "text" as const,
-            text: `${summary}\n\nFiles changed:\n${filesChanged.map((f) => `- ${f}`).join("\n") || "- none"}`,
+            text: `${summary}\n\nFiles changed:\n${filesChanged.map((f) => `- ${f}`).join("\n") || "- none"}${redirectNote}`,
           },
         ],
       };
@@ -119,13 +145,13 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
         content: [
           {
             type: "text" as const,
-            text: `⚠ Partial mutation: ${outcome.filesChanged.length} file(s) written before failure.\nFiles: ${outcome.filesChanged.join(", ")}\nError: ${outcome.error}`,
+            text: `⚠ Partial mutation: ${outcome.filesChanged.length} file(s) written before failure.\nFiles: ${outcome.filesChanged.join(", ")}\nError: ${outcome.error}${redirectNote}`,
           },
         ],
       };
     }
     return {
-      content: [{ type: "text" as const, text: `Mutation failed: ${outcome.error}` }],
+      content: [{ type: "text" as const, text: `Mutation failed: ${outcome.error}${redirectNote}` }],
       isError: true,
     };
   };
@@ -146,9 +172,9 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
       },
     },
     async ({ content, suggested_path, shelf }) => {
-      const r = resolveKb(registry, shelf);
+      const r = await resolveWritableKb(registry, shelf);
       if ("error" in r) return errorReply(r.error);
-      const kb = r.kb;
+      const { kb, redirectedFrom } = r;
       // Wrap the payload as an explicit directive. Bare content (e.g. a plain
       // fact like "The user's name is Anirban Kar.") otherwise reads as a chat
       // message and the agent replies conversationally instead of persisting it.
@@ -164,7 +190,7 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
         (suggested_path ? `\n\nIf it fits, place new content at ${suggested_path}.` : "");
       const outcome = await runMutation(kb, instruction);
       await refreshSeed();
-      return mutationOutcomeResponse(outcome);
+      return mutationOutcomeResponse(outcome, redirectedFrom);
     }
   );
 
@@ -180,11 +206,11 @@ export async function buildMcpServer(registry: ShelfRegistry): Promise<McpServer
       },
     },
     async ({ instruction, shelf }) => {
-      const r = resolveKb(registry, shelf);
+      const r = await resolveWritableKb(registry, shelf);
       if ("error" in r) return errorReply(r.error);
       const outcome = await runMutation(r.kb, instruction);
       await refreshSeed();
-      return mutationOutcomeResponse(outcome);
+      return mutationOutcomeResponse(outcome, r.redirectedFrom);
     }
   );
 

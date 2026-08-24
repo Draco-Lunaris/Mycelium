@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TreeNode } from "@mycelium/core";
-import { deriveConceptDescription } from "../../src/mcp/seed.js";
+import { deriveConceptDescription, seedInstructions } from "../../src/mcp/seed.js";
 
 describe("seed", () => {
   describe("deriveConceptDescription", () => {
@@ -36,6 +36,19 @@ describe("seed", () => {
 
         expect(actual).toEqual(expected);
       });
+    });
+  });
+
+  describe("seedInstructions", () => {
+    it("states the book-only shelf rule", () => {
+      const text = seedInstructions("MEMORY OVERVIEW HERE");
+      expect(text).toContain("book-only");
+      expect(text).toContain("global store");
+    });
+
+    it("no longer tells clients to put topic detail in the matching shelf", () => {
+      const text = seedInstructions("MEMORY OVERVIEW HERE");
+      expect(text).not.toContain("topic detail in the matching shelf");
     });
   });
 });
