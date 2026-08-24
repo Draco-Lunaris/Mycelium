@@ -188,14 +188,16 @@ pnpm --filter @mycelium/web dev
 
 The global bundle keeps the high-level map; a **shelf** is a second OKF bundle (its own `index.md`/`log.md`/graph) holding a topic's detail. Shelves live under `SHELVES_ROOT` (default a `shelves/` dir sibling to `BUNDLE_ROOT`); each subdirectory containing an `index.md` is a shelf.
 
-**Routing is explicit.** The MCP tools (`memory_query`/`memory_add`/`memory_update`/`memory_status`/`memory_maintain`/`memory_ingest_book`) and the `/api/*` browse routes accept an optional `shelf` argument (default = global):
+**Routing is explicit.** The MCP tools (`memory_query`/`memory_add`/`memory_update`/`memory_status`/`memory_maintain`) and the `/api/*` browse routes accept an optional `shelf` argument (default = global):
 
 ```
 memory_query({ question: "summarize chapter 3", shelf: "mycology" })
 GET /api/graph?shelf=mycology
 ```
 
-The session-start seed lists available shelves so the calling agent knows where to look. The internal agent stays scoped to one bundle per call — global for high-level topics, the matching shelf for detail.
+The session-start seed lists available shelves so the calling agent knows where to look. The internal agent stays scoped to one bundle per call.
+
+**Book shelves are write-protected.** Named shelves hold only the librarian's `Book`/`Chapter` catalog — not general knowledge. `memory_add`/`memory_update` aimed at a book shelf are **redirected to the global store** (the response notes the reroute); reads (`memory_query`/`memory_status`/`memory_maintain`) still target any shelf. A book shelf is marked with a `kind: book` key in its `info.md`, and the librarian (`ingestBook`) is the only writer that catalogs onto one. Keep general facts, decisions, and how-tos on the global store.
 
 ### Shelf CLI
 
@@ -228,26 +230,28 @@ Large catalog shelves (>300 concepts) automatically get a compact, segment-level
 
 #### Ingesting a book
 
-Books are ingested through the `memory_ingest_book` MCP tool — the mycelium server is the
+Books are ingested through the `POST /api/ingest-book` HTTP endpoint — the mycelium server is the
 **librarian**. The workflow is decoupled from pdf-to-markdown: pdf-to-markdown (a separate tool)
-produces a readable markdown file of the book and nothing more; you hand that markdown to mycelium,
-which stores it and catalogs it.
+produces a readable markdown file of the book and nothing more; you hand that file to mycelium,
+which stores it and catalogs it. (The old inline-text `memory_ingest_book` MCP tool was removed —
+real ~700 KB books truncated/drifted when squeezed through a tool argument, so ingest now streams
+the file from disk instead.)
 
-```
-memory_ingest_book({
-  markdown: "<the book's GFM markdown — chapter headings must carry {#ch-N-<slug>} anchor IDs>",
-  title: "Book Title",        // optional; derived from the first H1 if omitted
-  shelf: "python",            // optional target topic shelf; if omitted the librarian routes it
-  description: "Python books" // used if the shelf is created
-})
+```bash
+curl -F file=@book.md \
+     -F shelf=python \
+     -F title="Book Title" \
+     -F slug=book-title \
+     http://mycelium.moon-dragon.us/api/ingest-book
 ```
 
-The tool stores the full text **once** in the stacks (`library/<slug>/<slug>.md`), then an internal
-librarian agent derives the chapter outline (via `read_passage`), writes a ≤200-char summary per
-chapter, decides/creates the **topic shelf**, and writes the lightweight `Book`/`Chapter` catalog
-concepts into it. Books go on topic shelves, not the global shelf; a book that fits more than one
-topic is cataloged in each (one catalog segment per shelf, single stacks copy). Re-ingesting the
-same book into another shelf reuses the one stacks copy.
+The endpoint stages the uploaded `.md` to disk, stores the full text **once** in the stacks
+(`library/<slug>/<slug>.md`), then an internal librarian agent derives the chapter outline (via
+`read_passage`), writes a ≤200-char summary per chapter, decides/creates the **topic shelf**, and
+writes the lightweight `Book`/`Chapter` catalog concepts into it. Books go on topic shelves, not
+the global shelf; a book that fits more than one topic is cataloged in each (one catalog segment
+per shelf, single stacks copy). Re-ingesting the same book into another shelf reuses the one
+stacks copy.
 
 Each shelf has an `info.md` (topic + description); the session seed lists shelves with their
 descriptions so the agent routes to the right one. Query with
